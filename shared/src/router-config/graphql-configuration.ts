@@ -13,6 +13,7 @@ import {
   KafkaEventConfiguration,
   NatsEventConfiguration,
   NatsStreamConfiguration,
+  RabbitMQEventConfiguration,
   RequiredField,
   Scopes,
   SubscriptionFieldCondition,
@@ -25,6 +26,7 @@ import {
   NatsEventType as CompositionEventType,
   PROVIDER_TYPE_KAFKA,
   PROVIDER_TYPE_NATS,
+  PROVIDER_TYPE_RABBITMQ,
   RequiredFieldConfiguration,
   SubscriptionCondition,
 } from '@wundergraph/composition';
@@ -115,7 +117,7 @@ export function configurationDatasToDataSourceConfiguration(
     childNodes: [],
     keys: [],
     provides: [],
-    events: new DataSourceCustomEvents({ nats: [], kafka: [] }),
+    events: new DataSourceCustomEvents({ nats: [], kafka: [], rabbitmq: [] }),
     requires: [],
     entityInterfaces: [],
     interfaceObjects: [],
@@ -181,6 +183,20 @@ export function configurationDatasToDataSourceConfiguration(
                     }),
                   }
                 : {}),
+            }),
+          );
+          break;
+        }
+        case PROVIDER_TYPE_RABBITMQ: {
+          output.events.rabbitmq.push(
+            new RabbitMQEventConfiguration({
+              engineEventConfiguration: new EngineEventConfiguration({
+                fieldName: event.fieldName,
+                providerId: event.providerId,
+                type: eventType(event.type),
+                typeName,
+              }),
+              queues: event.queues,
             }),
           );
           break;

@@ -16,3 +16,6 @@ events:
       - id: my-kafka
         brokers:
           - "kafka:9092"
+    rabbitmq:
+      - id: my-rabbitmq
+        url: "amqp://guest:guest@rabbitmq:5672/"

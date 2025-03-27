@@ -269,6 +269,13 @@ events:
           sasl_plain:
             username: "admin"
             password: "admin"
+    rabbitmq:
+      - id: my-rabbitmq
+        url: "amqp://localhost:5672"
+        authentication:
+          user_info:
+            username: "guest"
+            password: "guest"
 
 engine:
   enable_single_flight: true

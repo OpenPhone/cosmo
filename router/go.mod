@@ -24,6 +24,7 @@ require (
 	github.com/nats-io/nuid v1.0.1
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.19.1
+	github.com/rabbitmq/amqp091-go v1.9.0
 	github.com/redis/go-redis/v9 v9.4.0
 	github.com/sebdah/goldie/v2 v2.5.3
 	github.com/shirou/gopsutil/v3 v3.24.3

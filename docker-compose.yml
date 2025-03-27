@@ -318,6 +318,20 @@ services:
       - dev
       - edfs
 
+  rabbitmq:
+    image: rabbitmq:${DC_RABBITMQ_VERSION:-3-management}
+    ports:
+      - '5672:5672'   # AMQP port
+      - '15672:15672' # Management UI port
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-guest}
+    networks:
+      - primary
+    profiles:
+      - dev
+      - edfs
+
 # This network is shared between this file and docker-compose.full.yml to
 # allow the demo subgraphs to communicate with the rest of the infra
 networks:

@@ -565,6 +565,9 @@ func NewRouter(opts ...Option) (*Router, error) {
 	for _, source := range r.eventsConfig.Providers.Kafka {
 		r.logger.Info("Kafka Event source enabled", zap.String("provider_id", source.ID), zap.Strings("brokers", source.Brokers))
 	}
+	for _, source := range r.eventsConfig.Providers.RabbitMQ {
+		r.logger.Info("RabbitMQ Event source enabled", zap.String("provider_id", source.ID), zap.String("url", source.URL))
+	}
 
 	if !r.engineExecutionConfiguration.EnableNetPoll {
 		r.logger.Warn("Net poller is disabled by configuration. Falling back to less efficient connection handling method.")

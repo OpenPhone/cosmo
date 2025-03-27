@@ -49,6 +49,7 @@ import (
 	"github.com/wundergraph/cosmo/router/pkg/pubsub"
 	"github.com/wundergraph/cosmo/router/pkg/pubsub/kafka"
 	pubsubNats "github.com/wundergraph/cosmo/router/pkg/pubsub/nats"
+	"github.com/wundergraph/cosmo/router/pkg/pubsub/rabbitmq"
 	"github.com/wundergraph/cosmo/router/pkg/statistics"
 	rtrace "github.com/wundergraph/cosmo/router/pkg/trace"
 )
@@ -66,8 +67,9 @@ type (
 	}
 
 	EnginePubSubProviders struct {
-		nats  map[string]pubsub_datasource.NatsPubSub
-		kafka map[string]pubsub_datasource.KafkaPubSub
+		nats     map[string]pubsub_datasource.NatsPubSub
+		kafka    map[string]pubsub_datasource.KafkaPubSub
+		rabbitMQ map[string]pubsub_datasource.RabbitMQPubSub
 	}
 
 	// graphServer is the swappable implementation of a Graph instance which is an HTTP mux with middlewares.
@@ -127,8 +129,9 @@ func newGraphServer(ctx context.Context, r *Router, routerConfig *nodev1.RouterC
 		routerListenAddr:        r.listenAddr,
 		hostName:                r.hostName,
 		pubSubProviders: &EnginePubSubProviders{
-			nats:  map[string]pubsub_datasource.NatsPubSub{},
-			kafka: map[string]pubsub_datasource.KafkaPubSub{},
+			nats:     map[string]pubsub_datasource.NatsPubSub{},
+			kafka:    map[string]pubsub_datasource.KafkaPubSub{},
+			rabbitMQ: map[string]pubsub_datasource.RabbitMQPubSub{},
 		},
 	}
 
@@ -1258,6 +1261,33 @@ func (s *graphServer) buildPubSubConfiguration(ctx context.Context, engineConfig
 			}
 		}
 
+		for _, eventConfiguration := range datasourceConfiguration.GetCustomEvents().GetRabbitMQ() {
+
+			providerID := eventConfiguration.EngineEventConfiguration.GetProviderId()
+			// if this source name's provider has already been initiated, do not try to initiate again
+			_, ok := s.pubSubProviders.rabbitMQ[providerID]
+			if ok {
+				continue
+			}
+
+			for _, eventSource := range routerEngineCfg.Events.Providers.RabbitMQ {
+				if eventSource.ID == providerID {
+					connector, err := rabbitmq.NewConnector(s.logger, eventSource.URL)
+					if err != nil {
+						return fmt.Errorf("failed to create connector for RabbitMQ provider with ID \"%s\": %w", providerID, err)
+					}
+
+					s.pubSubProviders.rabbitMQ[providerID] = connector.New(ctx)
+
+					break
+				}
+			}
+
+			_, ok = s.pubSubProviders.rabbitMQ[providerID]
+			if !ok {
+				return fmt.Errorf("failed to find RabbitMQ provider with ID \"%s\". Ensure the provider definition is part of the config", providerID)
+			}
+		}
 	}
 
 	return nil
@@ -1356,6 +1386,14 @@ func (s *graphServer) Shutdown(ctx context.Context) error {
 			if p, ok := pubSub.(pubsub.Lifecycle); ok {
 				if err := p.Shutdown(ctx); err != nil {
 					s.logger.Error("Failed to shutdown Kafka pubsub provider", zap.Error(err))
+					finalErr = errors.Join(finalErr, err)
+				}
+			}
+		}
+		for _, pubSub := range s.pubSubProviders.rabbitMQ {
+			if p, ok := pubSub.(pubsub.Lifecycle); ok {
+				if err := p.Shutdown(ctx); err != nil {
+					s.logger.Error("Failed to shutdown RabbitMQ pubsub provider", zap.Error(err))
 					finalErr = errors.Join(finalErr, err)
 				}
 			}

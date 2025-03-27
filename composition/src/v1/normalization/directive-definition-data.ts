@@ -10,6 +10,8 @@ import {
   EDFS_NATS_PUBLISH_DEFINITION,
   EDFS_NATS_REQUEST_DEFINITION,
   EDFS_NATS_SUBSCRIBE_DEFINITION,
+  EDFS_RABBITMQ_PUBLISH_DEFINITION,
+  EDFS_RABBITMQ_SUBSCRIBE_DEFINITION,
   EXTENDS_DEFINITION,
   EXTERNAL_DEFINITION,
   INACCESSIBLE_DEFINITION,
@@ -47,6 +49,9 @@ import {
   EDFS_NATS_REQUEST,
   EDFS_NATS_STREAM_CONFIGURATION,
   EDFS_NATS_SUBSCRIBE,
+  EDFS_RABBITMQ_PUBLISH,
+  EDFS_RABBITMQ_STREAM_CONFIGURATION,
+  EDFS_RABBITMQ_SUBSCRIBE,
   ENUM_UPPER,
   ENUM_VALUE_UPPER,
   EXTENDS,
@@ -71,6 +76,7 @@ import {
   PROPAGATE,
   PROVIDER_ID,
   PROVIDES,
+  QUEUES,
   REASON,
   REQUIRES,
   REQUIRES_SCOPES,
@@ -431,6 +437,77 @@ export const NATS_SUBSCRIBE_DEFINITION_DATA: DirectiveDefinitionData = {
   node: EDFS_NATS_SUBSCRIBE_DEFINITION,
   optionalArgumentNames: new Set<string>([PROVIDER_ID]),
   requiredArgumentNames: new Set<string>([SUBJECTS]),
+};
+
+export const RABBITMQ_PUBLISH_DEFINITION_DATA: DirectiveDefinitionData = {
+  argumentTypeNodeByArgumentName: new Map<string, ArgumentData>([
+    [
+      QUEUES,
+      {
+        name: QUEUES,
+        typeNode: REQUIRED_STRING_TYPE_NODE,
+      },
+    ],
+    [
+      PROVIDER_ID,
+      {
+        name: PROVIDER_ID,
+        typeNode: REQUIRED_STRING_TYPE_NODE,
+        defaultValue: {
+          kind: Kind.STRING,
+          value: DEFAULT_EDFS_PROVIDER_ID,
+        },
+      },
+    ],
+  ]),
+  isRepeatable: false,
+  locations: new Set<string>([FIELD_DEFINITION_UPPER]),
+  name: EDFS_RABBITMQ_PUBLISH,
+  node: EDFS_RABBITMQ_PUBLISH_DEFINITION,
+  optionalArgumentNames: new Set<string>([PROVIDER_ID]),
+  requiredArgumentNames: new Set<string>([QUEUES]),
+};
+
+export const RABBITMQ_SUBSCRIBE_DEFINITION_DATA: DirectiveDefinitionData = {
+  argumentTypeNodeByArgumentName: new Map<string, ArgumentData>([
+    [
+      QUEUES,
+      {
+        name: QUEUES,
+        typeNode: {
+          kind: Kind.NON_NULL_TYPE,
+          type: {
+            kind: Kind.LIST_TYPE,
+            type: REQUIRED_STRING_TYPE_NODE,
+          },
+        },
+      },
+    ],
+    [
+      PROVIDER_ID,
+      {
+        name: PROVIDER_ID,
+        typeNode: REQUIRED_STRING_TYPE_NODE,
+        defaultValue: {
+          kind: Kind.STRING,
+          value: DEFAULT_EDFS_PROVIDER_ID,
+        },
+      },
+    ],
+    [
+      STREAM_CONFIGURATION,
+      {
+        name: STREAM_CONFIGURATION,
+        typeNode: stringToNamedTypeNode(EDFS_RABBITMQ_STREAM_CONFIGURATION),
+      },
+    ],
+  ]),
+  isRepeatable: false,
+  locations: new Set<string>([FIELD_DEFINITION_UPPER]),
+  name: EDFS_RABBITMQ_SUBSCRIBE,
+  node: EDFS_RABBITMQ_SUBSCRIBE_DEFINITION,
+  optionalArgumentNames: new Set<string>([PROVIDER_ID]),
+  requiredArgumentNames: new Set<string>([QUEUES]),
 };
 
 export const OVERRIDE_DEFINITION_DATA: DirectiveDefinitionData = {

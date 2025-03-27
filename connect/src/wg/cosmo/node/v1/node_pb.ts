@@ -1625,6 +1625,49 @@ export class KafkaEventConfiguration extends Message<KafkaEventConfiguration> {
 }
 
 /**
+ * @generated from message wg.cosmo.node.v1.RabbitMQEventConfiguration
+ */
+export class RabbitMQEventConfiguration extends Message<RabbitMQEventConfiguration> {
+  /**
+   * @generated from field: wg.cosmo.node.v1.EngineEventConfiguration engine_event_configuration = 1;
+   */
+  engineEventConfiguration?: EngineEventConfiguration;
+
+  /**
+   * @generated from field: repeated string queues = 2;
+   */
+  queues: string[] = [];
+
+  constructor(data?: PartialMessage<RabbitMQEventConfiguration>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "wg.cosmo.node.v1.RabbitMQEventConfiguration";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "engine_event_configuration", kind: "message", T: EngineEventConfiguration },
+    { no: 2, name: "queues", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RabbitMQEventConfiguration {
+    return new RabbitMQEventConfiguration().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RabbitMQEventConfiguration {
+    return new RabbitMQEventConfiguration().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RabbitMQEventConfiguration {
+    return new RabbitMQEventConfiguration().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RabbitMQEventConfiguration | PlainMessage<RabbitMQEventConfiguration> | undefined, b: RabbitMQEventConfiguration | PlainMessage<RabbitMQEventConfiguration> | undefined): boolean {
+    return proto3.util.equals(RabbitMQEventConfiguration, a, b);
+  }
+}
+
+/**
  * @generated from message wg.cosmo.node.v1.EngineEventConfiguration
  */
 export class EngineEventConfiguration extends Message<EngineEventConfiguration> {
@@ -1693,6 +1736,11 @@ export class DataSourceCustomEvents extends Message<DataSourceCustomEvents> {
    */
   kafka: KafkaEventConfiguration[] = [];
 
+  /**
+   * @generated from field: repeated wg.cosmo.node.v1.RabbitMQEventConfiguration rabbitmq = 3;
+   */
+  rabbitmq: RabbitMQEventConfiguration[] = [];
+
   constructor(data?: PartialMessage<DataSourceCustomEvents>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1703,6 +1751,7 @@ export class DataSourceCustomEvents extends Message<DataSourceCustomEvents> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "nats", kind: "message", T: NatsEventConfiguration, repeated: true },
     { no: 2, name: "kafka", kind: "message", T: KafkaEventConfiguration, repeated: true },
+    { no: 3, name: "rabbitmq", kind: "message", T: RabbitMQEventConfiguration, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DataSourceCustomEvents {

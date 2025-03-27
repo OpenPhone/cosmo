@@ -31,6 +31,9 @@ import {
   DESCRIPTION_OVERRIDE,
   EDFS_KAFKA_PUBLISH,
   EDFS_KAFKA_SUBSCRIBE,
+  EDFS_RABBITMQ_PUBLISH,
+  EDFS_RABBITMQ_STREAM_CONFIGURATION,
+  EDFS_RABBITMQ_SUBSCRIBE,
   EDFS_NATS_PUBLISH,
   EDFS_NATS_REQUEST,
   EDFS_NATS_STREAM_CONFIGURATION,
@@ -91,6 +94,7 @@ import {
   TAG,
   TOPIC,
   TOPICS,
+  QUEUES,
   UNION_UPPER,
   URL_LOWER,
   VALUES,
@@ -207,6 +211,65 @@ export const EDFS_KAFKA_SUBSCRIBE_DEFINITION: DirectiveDefinitionNode = {
   kind: Kind.DIRECTIVE_DEFINITION,
   locations: [stringToNameNode(FIELD_DEFINITION_UPPER)],
   name: stringToNameNode(EDFS_KAFKA_SUBSCRIBE),
+  repeatable: false,
+};
+
+// directive @edfs__rabbitmqPublish(queues: String!, providerId: String! = "default") on FIELD_DEFINITION
+export const EDFS_RABBITMQ_PUBLISH_DEFINITION: DirectiveDefinitionNode = {
+  arguments: [
+    {
+      kind: Kind.INPUT_VALUE_DEFINITION,
+      name: stringToNameNode(QUEUES),
+      type: REQUIRED_STRING_TYPE_NODE,
+    },
+    {
+      kind: Kind.INPUT_VALUE_DEFINITION,
+      name: stringToNameNode(PROVIDER_ID),
+      type: REQUIRED_STRING_TYPE_NODE,
+      defaultValue: {
+        kind: Kind.STRING,
+        value: DEFAULT_EDFS_PROVIDER_ID,
+      },
+    },
+  ],
+  kind: Kind.DIRECTIVE_DEFINITION,
+  locations: [stringToNameNode(FIELD_DEFINITION_UPPER)],
+  name: stringToNameNode(EDFS_RABBITMQ_PUBLISH),
+  repeatable: false,
+};
+
+// directive @edfs__rabbitmqSubscribe(queues: [String!]!, providerId: String! = "default", streamConfiguration: edfs__RabbitMQStreamConfiguration) on FIELD_DEFINITION
+export const EDFS_RABBITMQ_SUBSCRIBE_DEFINITION: DirectiveDefinitionNode = {
+  arguments: [
+    {
+      kind: Kind.INPUT_VALUE_DEFINITION,
+      name: stringToNameNode(QUEUES),
+      type: {
+        kind: Kind.NON_NULL_TYPE,
+        type: {
+          kind: Kind.LIST_TYPE,
+          type: REQUIRED_STRING_TYPE_NODE,
+        },
+      },
+    },
+    {
+      kind: Kind.INPUT_VALUE_DEFINITION,
+      name: stringToNameNode(PROVIDER_ID),
+      type: REQUIRED_STRING_TYPE_NODE,
+      defaultValue: {
+        kind: Kind.STRING,
+        value: DEFAULT_EDFS_PROVIDER_ID,
+      },
+    },
+    {
+      kind: Kind.INPUT_VALUE_DEFINITION,
+      name: stringToNameNode(STREAM_CONFIGURATION),
+      type: stringToNamedTypeNode(EDFS_RABBITMQ_STREAM_CONFIGURATION),
+    },
+  ],
+  kind: Kind.DIRECTIVE_DEFINITION,
+  locations: [stringToNameNode(FIELD_DEFINITION_UPPER)],
+  name: stringToNameNode(EDFS_RABBITMQ_SUBSCRIBE),
   repeatable: false,
 };
 
@@ -421,6 +484,8 @@ export const BASE_DIRECTIVE_DEFINITION_BY_DIRECTIVE_NAME = new Map<string, Direc
   [EXTERNAL, EXTERNAL_DEFINITION],
   [EDFS_KAFKA_PUBLISH, EDFS_KAFKA_PUBLISH_DEFINITION],
   [EDFS_KAFKA_SUBSCRIBE, EDFS_KAFKA_SUBSCRIBE_DEFINITION],
+  [EDFS_RABBITMQ_PUBLISH, EDFS_RABBITMQ_PUBLISH_DEFINITION],
+  [EDFS_RABBITMQ_SUBSCRIBE, EDFS_RABBITMQ_SUBSCRIBE_DEFINITION],
   [EDFS_NATS_PUBLISH, EDFS_NATS_PUBLISH_DEFINITION],
   [EDFS_NATS_REQUEST, EDFS_NATS_REQUEST_DEFINITION],
   [EDFS_NATS_SUBSCRIBE, EDFS_NATS_SUBSCRIBE_DEFINITION],
@@ -442,6 +507,8 @@ export const ALL_IN_BUILT_DIRECTIVE_NAMES = new Set<string>([
   EDFS_NATS_SUBSCRIBE,
   EDFS_KAFKA_PUBLISH,
   EDFS_KAFKA_SUBSCRIBE,
+  EDFS_RABBITMQ_PUBLISH,
+  EDFS_RABBITMQ_SUBSCRIBE,
   EXTENDS,
   EXTERNAL,
   INACCESSIBLE,
@@ -766,6 +833,8 @@ export const BASE_DIRECTIVE_DEFINITIONS: DirectiveDefinitionNode[] = [
 export const EVENT_DRIVEN_DIRECTIVE_DEFINITIONS_BY_DIRECTIVE_NAME = new Map<string, DirectiveDefinitionNode>([
   [EDFS_KAFKA_PUBLISH, EDFS_KAFKA_PUBLISH_DEFINITION],
   [EDFS_KAFKA_SUBSCRIBE, EDFS_KAFKA_SUBSCRIBE_DEFINITION],
+  [EDFS_RABBITMQ_PUBLISH, EDFS_RABBITMQ_PUBLISH_DEFINITION],
+  [EDFS_RABBITMQ_SUBSCRIBE, EDFS_RABBITMQ_SUBSCRIBE_DEFINITION],
   [EDFS_NATS_PUBLISH, EDFS_NATS_PUBLISH_DEFINITION],
   [EDFS_NATS_REQUEST, EDFS_NATS_REQUEST_DEFINITION],
   [EDFS_NATS_SUBSCRIBE, EDFS_NATS_SUBSCRIBE_DEFINITION],

@@ -39,4 +39,18 @@ func TestEventsConfig(t *testing.T) {
 		})
 		assert.ErrorContains(t, err, "failed to find Nats provider with ID")
 	})
+
+	t.Run("rabbitmq provider not specified in the router configuration", func(t *testing.T) {
+		err := testenv.RunWithError(t, &testenv.Config{
+			RouterConfigJSONTemplate: testenv.ConfigWithEdfsJSONTemplate,
+			EnableNats:               true,
+			EnableKafka:              true,
+			ModifyEventsConfiguration: func(eventsConfiguration *config.EventsConfiguration) {
+				eventsConfiguration.Providers.RabbitMQ = nil
+			},
+		}, func(t *testing.T, xEnv *testenv.Environment) {
+			assert.Fail(t, "should not be called")
+		})
+		assert.ErrorContains(t, err, "failed to find RabbitMQ provider with ID")
+	})
 }

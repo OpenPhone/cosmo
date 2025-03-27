@@ -20,3 +20,12 @@ lerna-debug.log
 # Go workspace files
 go.work
 go.work.sum
+
+# Development artifacts
+.junie/
+.output.txt
+**/INTEGRATION.md
+
+# Submodule development
+.gitmodules
+graphql-go-tools/

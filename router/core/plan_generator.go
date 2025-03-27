@@ -161,6 +161,7 @@ func (pg *PlanGenerator) buildRouterConfig(configFilePath string) (*nodev1.Route
 func (pg *PlanGenerator) loadConfiguration(routerConfig *nodev1.RouterConfig, logger *zap.Logger, maxDataSourceCollectorsConcurrency uint) error {
 	natSources := map[string]pubsub_datasource.NatsPubSub{}
 	kafkaSources := map[string]pubsub_datasource.KafkaPubSub{}
+	rabbitMQSources := map[string]pubsub_datasource.RabbitMQPubSub{}
 	for _, ds := range routerConfig.GetEngineConfig().GetDatasourceConfigurations() {
 		if ds.GetKind() != nodev1.DataSourceKind_PUBSUB || ds.GetCustomEvents() == nil {
 			continue
@@ -177,8 +178,14 @@ func (pg *PlanGenerator) loadConfiguration(routerConfig *nodev1.RouterConfig, lo
 				kafkaSources[providerId] = nil
 			}
 		}
+		for _, rabbitMQConfig := range ds.GetCustomEvents().GetRabbitMQ() {
+			providerId := rabbitMQConfig.GetEngineEventConfiguration().GetProviderId()
+			if _, ok := rabbitMQSources[providerId]; !ok {
+				rabbitMQSources[providerId] = nil
+			}
+		}
 	}
-	pubSubFactory := pubsub_datasource.NewFactory(context.Background(), natSources, kafkaSources)
+	pubSubFactory := pubsub_datasource.NewFactory(context.Background(), natSources, kafkaSources, rabbitMQSources)
 
 	var netPollConfig graphql_datasource.NetPollConfiguration
 	netPollConfig.ApplyDefaults()

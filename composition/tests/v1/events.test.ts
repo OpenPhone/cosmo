@@ -7,6 +7,8 @@ import {
   EDFS_NATS_PUBLISH,
   EDFS_NATS_REQUEST,
   EDFS_NATS_SUBSCRIBE,
+  EDFS_RABBITMQ_PUBLISH,
+  EDFS_RABBITMQ_SUBSCRIBE,
   federateSubgraphs,
   FederationResultFailure,
   FederationResultSuccess,
@@ -36,6 +38,8 @@ import {
   PROVIDER_ID,
   PROVIDER_TYPE_KAFKA,
   PROVIDER_TYPE_NATS,
+  PROVIDER_TYPE_RABBITMQ,
+  QUEUES,
   ROUTER_COMPATIBILITY_VERSION_ONE,
   Subgraph,
   subgraphValidationError,
@@ -783,85 +787,781 @@ describe('events Configuration tests', () => {
     
     scalar openfed__FieldSet
       `,
+        ),
+      );
+    });
+
+    test('that RabbitMQ events configuration is correctly generated', () => {
+      const result = normalizeSubgraph(
+        subgraphRabbitMQ.definitions,
+        subgraphRabbitMQ.name,
+        undefined,
+        ROUTER_COMPATIBILITY_VERSION_ONE,
+      ) as NormalizationResultSuccess;
+      expect(result.success).toBe(true);
+      expect(result.configurationDataByTypeName).toStrictEqual(
+        new Map<string, ConfigurationData>([
+          [
+            'Query',
+            {
+              fieldNames: new Set<string>(['findEntity']),
+              isRootNode: true,
+              typeName: 'Query',
+              events: [
+                {
+                  fieldName: 'findEntity',
+                  providerId: DEFAULT_EDFS_PROVIDER_ID,
+                  providerType: PROVIDER_TYPE_RABBITMQ,
+                  queues: ['findEntity.{{ args.id }}'],
+                  type: 'subscribe',
+                },
+              ],
+            },
+          ],
+          [
+            'edfs__PublishResult',
+            {
+              fieldNames: new Set<string>(['success']),
+              isRootNode: false,
+              typeName: 'edfs__PublishResult',
+            },
+          ],
+          [
+            'Mutation',
+            {
+              fieldNames: new Set<string>(['updateEntity']),
+              isRootNode: true,
+              typeName: 'Mutation',
+              events: [
+                {
+                  fieldName: 'updateEntity',
+                  providerId: DEFAULT_EDFS_PROVIDER_ID,
+                  providerType: PROVIDER_TYPE_RABBITMQ,
+                  queues: ['updateEntity.{{ args.id }}'],
+                  type: 'publish',
+                },
+              ],
+            },
+          ],
+          [
+            'Subscription',
+            {
+              fieldNames: new Set<string>(['entitySubscription', 'entitySubscriptionTwo']),
+              isRootNode: true,
+              typeName: 'Subscription',
+              events: [
+                {
+                  fieldName: 'entitySubscription',
+                  providerId: 'my-provider',
+                  providerType: PROVIDER_TYPE_RABBITMQ,
+                  queues: ['entities.{{ args.id }}'],
+                  type: 'subscribe',
+                },
+                {
+                  fieldName: 'entitySubscriptionTwo',
+                  providerId: 'double',
+                  providerType: PROVIDER_TYPE_RABBITMQ,
+                  queues: ['firstSub.{{ args.firstID }}', 'secondSub.{{ args.secondID }}'],
+                  type: 'subscribe',
+                },
+              ],
+            },
+          ],
+          [
+            'Entity',
+            {
+              externalFieldNames: new Set<string>(['id']),
+              fieldNames: new Set<string>(['id']),
+              isRootNode: true,
+              keys: [{ fieldName: '', selectionSet: 'id', disableEntityResolver: true }],
+              typeName: 'Entity',
+            },
+          ],
+        ]),
+      );
+      expect(schemaToSortedNormalizedString(result.schema)).toBe(
+        normalizeString(
+          versionOneFullEventDefinitions +
+            `
+        type Entity @key(fields: "id", resolvable: false) {
+          id: ID! @external
+        }
+
+        type Mutation {
+          updateEntity(id: ID!, name: String!): edfs__PublishResult! @edfs__rabbitmqPublish(queues: "updateEntity.{{ args.id }}")
+        }
+
+        type Query {
+          findEntity(id: ID!): Entity! @edfs__rabbitmqSubscribe(queues: ["findEntity.{{ args.id }}"])
+        }
+
+        type Subscription {
+          entitySubscription(id: ID!): Entity! @edfs__rabbitmqSubscribe(queues: ["entities.{{ args.id }}"], providerId: "my-provider")
+          entitySubscriptionTwo(firstID: ID!, secondID: ID!): Entity! @edfs__rabbitmqSubscribe(queues: ["firstSub.{{ args.firstID }}", "secondSub.{{ args.secondID }}"], providerId: "double")
+        }
+
+        type edfs__PublishResult {
+         success: Boolean!
+        }
+
+        scalar openfed__FieldSet
+      `,
+        ),
+      );
+    });
+
+    test('that an error is returned if a RabbitMQ request subject is with a streamConfiguration and there is a wrong definition of edfs__RabbitMQStreamConfiguration', () => {
+      const result = normalizeSubgraph(
+        subgraphAV.definitions,
+        subgraphAV.name,
+        undefined,
+        ROUTER_COMPATIBILITY_VERSION_ONE,
+      ) as NormalizationResultFailure;
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toStrictEqual(
+        invalidEventDrivenGraphError([invalidNatsStreamConfigurationDefinitionErrorMessage]),
+      );
+    });
+
+    test('that no error is returned if a RabbitMQ request subject is without streamConfiguration and there is a wrong definition of edfs__RabbitMQStreamConfiguration', () => {
+      const result = normalizeSubgraph(
+        subgraphRabbitMQ.definitions,
+        subgraphRabbitMQ.name,
+        undefined,
+        ROUTER_COMPATIBILITY_VERSION_ONE,
+      ) as NormalizationResultSuccess;
+      expect(result.success).toBe(true);
+    });
+
+    test('that no error is returned if a RabbitMQ request subject is with a streamConfiguration and there is a correct definition of edfs__RabbitMQStreamConfiguration', () => {
+      const result = normalizeSubgraph(
+        subgraphAS.definitions,
+        subgraphAS.name,
+        undefined,
+        ROUTER_COMPATIBILITY_VERSION_ONE,
+      ) as NormalizationResultSuccess;
+      expect(result.success).toBe(true);
+    });
+
+    test('that an error is returned if a RabbitMQ request subject is with a streamConfiguration and there is a definition of edfs__RabbitMQStreamConfiguration without default consumerInactiveThreshold', () => {
+      const result = normalizeSubgraph(
+        subgraphAT.definitions,
+        subgraphAT.name,
+        undefined,
+        ROUTER_COMPATIBILITY_VERSION_ONE,
+      ) as NormalizationResultFailure;
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toStrictEqual(
+        invalidEventDrivenGraphError([invalidNatsStreamConfigurationDefinitionErrorMessage]),
+      );
+    });
+
+    test('that an error is returned if a RabbitMQ request subject is with a streamConfiguration and there is a definition of edfs__RabbitMQStreamConfiguration with an incorrect consumerInactiveThreshold default value', () => {
+      const result = normalizeSubgraph(
+        subgraphAU.definitions,
+        subgraphAU.name,
+        undefined,
+        ROUTER_COMPATIBILITY_VERSION_ONE,
+      ) as NormalizationResultFailure;
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toStrictEqual(
+        invalidEventDrivenGraphError([invalidNatsStreamConfigurationDefinitionErrorMessage]),
+      );
+    });
+
+    test('that an error is returned if a RabbitMQ subscribe subject references an invalid argument', () => {
+      const result = normalizeSubgraph(
+        subgraphW.definitions,
+        subgraphW.name,
+        undefined,
+        ROUTER_COMPATIBILITY_VERSION_ONE,
+      ) as NormalizationResultFailure;
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toStrictEqual(
+        invalidEventDirectiveError('edfs__rabbitmqSubscribe', 'Subscription.entitySubscription', [
+          undefinedEventSubjectsArgumentErrorMessage('invalid'),
+        ]),
+      );
+    });
+
+    test('that an error is returned if a RabbitMQ request subject references an invalid argument', () => {
+      const result = normalizeSubgraph(
+        subgraphX.definitions,
+        subgraphX.name,
+        undefined,
+        ROUTER_COMPATIBILITY_VERSION_ONE,
+      ) as NormalizationResultFailure;
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toStrictEqual(
+        invalidEventDirectiveError('edfs__rabbitmqRequest', 'Query.entityRequest', [
+          undefinedEventSubjectsArgumentErrorMessage('invalid'),
+        ]),
+      );
+    });
+
+    test('that an error is returned if a RabbitMQ publish subject references an invalid argument', () => {
+      const result = normalizeSubgraph(
+        subgraphY.definitions,
+        subgraphY.name,
+        undefined,
+        ROUTER_COMPATIBILITY_VERSION_ONE,
+      ) as NormalizationResultFailure;
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toStrictEqual(
+        invalidEventDirectiveError('edfs__rabbitmqPublish', 'Mutation.entityPublish', [
+          undefinedEventSubjectsArgumentErrorMessage('invalid'),
+        ]),
+      );
+    });
+
+    test('that an error is returned if a RabbitMQ subscribe subject references two invalid arguments', () => {
+      const result = normalizeSubgraph(
+        subgraphAB.definitions,
+        subgraphAB.name,
+        undefined,
+        ROUTER_COMPATIBILITY_VERSION_ONE,
+      ) as NormalizationResultFailure;
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toStrictEqual(
+        invalidEventDirectiveError('edfs__rabbitmqSubscribe', 'Subscription.entitySubscription', [
+          undefinedEventSubjectsArgumentErrorMessage('invalid'),
+          undefinedEventSubjectsArgumentErrorMessage('alsoinvalid'),
+        ]),
+      );
+    });
+
+    test('that an error is returned if a RabbitMQ request subject references two invalid arguments', () => {
+      const result = normalizeSubgraph(
+        subgraphAC.definitions,
+        subgraphAC.name,
+        undefined,
+        ROUTER_COMPATIBILITY_VERSION_ONE,
+      ) as NormalizationResultFailure;
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toStrictEqual(
+        invalidEventDirectiveError('edfs__rabbitmqRequest', 'Query.entityRequest', [
+          undefinedEventSubjectsArgumentErrorMessage('invalid'),
+          undefinedEventSubjectsArgumentErrorMessage('alsoinvalid'),
+        ]),
+      );
+    });
+
+    test('that an error is returned if a RabbitMQ publish subject references two invalid arguments', () => {
+      const result = normalizeSubgraph(
+        subgraphAD.definitions,
+        subgraphAD.name,
+        undefined,
+        ROUTER_COMPATIBILITY_VERSION_ONE,
+      ) as NormalizationResultFailure;
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toStrictEqual(
+        invalidEventDirectiveError('edfs__rabbitmqPublish', 'Mutation.entityPublish', [
+          undefinedEventSubjectsArgumentErrorMessage('invalid'),
+          undefinedEventSubjectsArgumentErrorMessage('alsoinvalid'),
+        ]),
+      );
+    });
+
+    test('that an error is returned if a RabbitMQ subscribe subject references a valid argument and an invalid one', () => {
+      const result = normalizeSubgraph(
+        subgraphAG.definitions,
+        subgraphAG.name,
+        undefined,
+        ROUTER_COMPATIBILITY_VERSION_ONE,
+      ) as NormalizationResultFailure;
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toStrictEqual(
+        invalidEventDirectiveError('edfs__rabbitmqSubscribe', 'Subscription.entitySubscription', [
+          undefinedEventSubjectsArgumentErrorMessage('invalid'),
+        ]),
+      );
+    });
+
+    test('that an error is returned if a RabbitMQ request subject references a valid argument and an invalid one', () => {
+      const result = normalizeSubgraph(
+        subgraphAH.definitions,
+        subgraphAH.name,
+        undefined,
+        ROUTER_COMPATIBILITY_VERSION_ONE,
+      ) as NormalizationResultFailure;
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toStrictEqual(
+        invalidEventDirectiveError('edfs__rabbitmqRequest', 'Query.entityRequest', [
+          undefinedEventSubjectsArgumentErrorMessage('invalid'),
+        ]),
+      );
+    });
+
+    test('that an error is returned if a RabbitMQ publish subject references a valid argument and an invalid one', () => {
+      const result = normalizeSubgraph(
+        subgraphAI.definitions,
+        subgraphAI.name,
+        undefined,
+        ROUTER_COMPATIBILITY_VERSION_ONE,
+      ) as NormalizationResultFailure;
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toStrictEqual(
+        invalidEventDirectiveError('edfs__rabbitmqPublish', 'Mutation.entityPublish', [
+          undefinedEventSubjectsArgumentErrorMessage('invalid'),
+        ]),
+      );
+    });
+  });
+
+  test('that an error is returned if a NATS subscribe subject references a valid argument and an invalid one', () => {
+    const result = normalizeSubgraph(
+      subgraphAG.definitions,
+      subgraphAG.name,
+      undefined,
+      ROUTER_COMPATIBILITY_VERSION_ONE,
+    ) as NormalizationResultFailure;
+    expect(result.success).toBe(false);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toStrictEqual(
+      invalidEventDirectiveError('edfs__natsSubscribe', 'Subscription.entitySubscription', [
+        undefinedEventSubjectsArgumentErrorMessage('invalid'),
+      ]),
+    );
+  });
+
+  test('that an error is returned if a NATS request subject references a valid argument and an invalid one', () => {
+    const result = normalizeSubgraph(
+      subgraphAH.definitions,
+      subgraphAH.name,
+      undefined,
+      ROUTER_COMPATIBILITY_VERSION_ONE,
+    ) as NormalizationResultFailure;
+    expect(result.success).toBe(false);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toStrictEqual(
+      invalidEventDirectiveError('edfs__natsRequest', 'Query.entityRequest', [
+        undefinedEventSubjectsArgumentErrorMessage('invalid'),
+      ]),
+    );
+  });
+
+  test('that an error is returned if a NATS request subject uses streamConfiguration and there is a wrong definition of edfs__NatsStreamConfiguration', () => {
+    const result = normalizeSubgraph(
+      subgraphAN.definitions,
+      subgraphAN.name,
+      undefined,
+      ROUTER_COMPATIBILITY_VERSION_ONE,
+    ) as NormalizationResultFailure;
+    expect(result.success).toBe(false);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toStrictEqual(
+      invalidEventDrivenGraphError([invalidNatsStreamConfigurationDefinitionErrorMessage]),
+    );
+  });
+
+  test('that no error is returned if a NATS request subject is without streamConfiguration and there is a wrong definition of edfs__NatsStreamConfiguration', () => {
+    const result = normalizeSubgraph(
+      subgraphAO.definitions,
+      subgraphAO.name,
+      undefined,
+      ROUTER_COMPATIBILITY_VERSION_ONE,
+    ) as NormalizationResultSuccess;
+    expect(result.success).toBe(true);
+    expect(schemaToSortedNormalizedString(result.schema)).toBe(
+      normalizeString(
+        versionOneSubscriptionEventDefinitions +
+          `
+    type Entity @key(fields: "id", resolvable: false) {
+      id: ID! @external
+    }
+
+    type Subscription {
+      entitySubscription(id: ID!): Entity! @edfs__natsSubscribe(
+        subjects: ["entities.{{ args.id }}"]
+      )
+    }
+
+    input edfs__NatsStreamConfiguration {
+      consumerInactiveThreshold: Int! = 30
+      consumerName: String!
+      streamName: String!
+    }
+
+    scalar openfed__FieldSet
+      `,
       ),
     );
   });
 
-  test('that an error is returned if a NATS request subject is with a streamConfiguration and there is a definition of edfs__NatsStreamConfiguration without default consumerInactiveThreshold', () => {
+  test('that no error is returned if a NATS request subject is with a streamConfiguration and there is a correct definition of edfs__NatsStreamConfiguration', () => {
     const result = normalizeSubgraph(
-      subgraphAQ.definitions,
-      subgraphAQ.name,
+      subgraphAP.definitions,
+      subgraphAP.name,
       undefined,
       ROUTER_COMPATIBILITY_VERSION_ONE,
-    ) as NormalizationResultFailure;
-    expect(result.success).toBe(false);
-    expect(result.errors).toHaveLength(1);
-    expect(result.errors[0]).toStrictEqual(
-      invalidEventDrivenGraphError([invalidNatsStreamConfigurationDefinitionErrorMessage]),
+    ) as NormalizationResultSuccess;
+    expect(result.success).toBe(true);
+    expect(schemaToSortedNormalizedString(result.schema)).toBe(
+      normalizeString(
+        versionOneSubscriptionEventDefinitions +
+          `
+    type Entity @key(fields: "id", resolvable: false) {
+      id: ID! @external
+    }
+
+    type Subscription {
+      entitySubscription(id: ID!): Entity! @edfs__natsSubscribe(
+        subjects: ["entities.{{ args.id }}"], 
+        streamConfiguration: {consumerInactiveThreshold: 300, consumerName: "consumer", streamName: "streamName"}
+      )
+    }
+
+    input edfs__NatsStreamConfiguration {
+      consumerInactiveThreshold: Int! = 30
+      consumerName: String!
+      streamName: String!
+    }
+
+    scalar openfed__FieldSet
+      `,
+      ),
     );
   });
 
-  test('that an error is returned if a NATS request subject is with a streamConfiguration and there is a definition of edfs__NatsStreamConfiguration with an incorrect consumerInactiveThreshold default value', () => {
+  test('that RabbitMQ events configuration is correctly generated', () => {
     const result = normalizeSubgraph(
-      subgraphAR.definitions,
-      subgraphAR.name,
+      subgraphRabbitMQ.definitions,
+      subgraphRabbitMQ.name,
       undefined,
       ROUTER_COMPATIBILITY_VERSION_ONE,
-    ) as NormalizationResultFailure;
-    expect(result.success).toBe(false);
-    expect(result.errors).toHaveLength(1);
-    expect(result.errors[0]).toStrictEqual(
-      invalidEventDrivenGraphError([invalidNatsStreamConfigurationDefinitionErrorMessage]),
-    );
-  });
-
-  test('that an error is returned if a NATS publish subject references a valid argument and an invalid one', () => {
-    const result = normalizeSubgraph(
-      subgraphAI.definitions,
-      subgraphAI.name,
-      undefined,
-      ROUTER_COMPATIBILITY_VERSION_ONE,
-    ) as NormalizationResultFailure;
-    expect(result.success).toBe(false);
-    expect(result.errors).toHaveLength(1);
-    expect(result.errors[0]).toStrictEqual(
-      invalidEventDirectiveError('edfs__natsPublish', 'Mutation.entityPublish', [
-        undefinedEventSubjectsArgumentErrorMessage('invalid'),
+    ) as NormalizationResultSuccess;
+    expect(result.success).toBe(true);
+    expect(result.configurationDataByTypeName).toStrictEqual(
+      new Map<string, ConfigurationData>([
+        [
+          'Query',
+          {
+            fieldNames: new Set<string>(['findEntity']),
+            isRootNode: true,
+            typeName: 'Query',
+            events: [
+              {
+                fieldName: 'findEntity',
+                providerId: DEFAULT_EDFS_PROVIDER_ID,
+                providerType: PROVIDER_TYPE_RABBITMQ,
+                queues: ['findEntity.{{ args.id }}'],
+                type: 'subscribe',
+              },
+            ],
+          },
+        ],
+        [
+          'edfs__PublishResult',
+          {
+            fieldNames: new Set<string>(['success']),
+            isRootNode: false,
+            typeName: 'edfs__PublishResult',
+          },
+        ],
+        [
+          'Mutation',
+          {
+            fieldNames: new Set<string>(['updateEntity']),
+            isRootNode: true,
+            typeName: 'Mutation',
+            events: [
+              {
+                fieldName: 'updateEntity',
+                providerId: DEFAULT_EDFS_PROVIDER_ID,
+                providerType: PROVIDER_TYPE_RABBITMQ,
+                queues: ['updateEntity.{{ args.id }}'],
+                type: 'publish',
+              },
+            ],
+          },
+        ],
+        [
+          'Subscription',
+          {
+            fieldNames: new Set<string>(['entitySubscription', 'entitySubscriptionTwo']),
+            isRootNode: true,
+            typeName: 'Subscription',
+            events: [
+              {
+                fieldName: 'entitySubscription',
+                providerId: 'my-provider',
+                providerType: PROVIDER_TYPE_RABBITMQ,
+                queues: ['entities.{{ args.id }}'],
+                type: 'subscribe',
+              },
+              {
+                fieldName: 'entitySubscriptionTwo',
+                providerId: 'double',
+                providerType: PROVIDER_TYPE_RABBITMQ,
+                queues: ['firstSub.{{ args.firstID }}', 'secondSub.{{ args.secondID }}'],
+                type: 'subscribe',
+              },
+            ],
+          },
+        ],
+        [
+          'Entity',
+          {
+            externalFieldNames: new Set<string>(['id']),
+            fieldNames: new Set<string>(['id']),
+            isRootNode: true,
+            keys: [{ fieldName: '', selectionSet: 'id', disableEntityResolver: true }],
+            typeName: 'Entity',
+          },
+        ],
       ]),
     );
-  });
+    expect(schemaToSortedNormalizedString(result.schema)).toBe(
+      normalizeString(
+        versionOneFullEventDefinitions +
+          `
+        type Entity @key(fields: "id", resolvable: false) {
+          id: ID! @external
+        }
 
-  test('that an error is returned if a Kafka subscribe subject references a valid argument and an invalid one', () => {
-    const result = normalizeSubgraph(
-      subgraphAL.definitions,
-      subgraphAL.name,
-      undefined,
-      ROUTER_COMPATIBILITY_VERSION_ONE,
-    ) as NormalizationResultFailure;
-    expect(result.success).toBe(false);
-    expect(result.errors).toHaveLength(1);
-    expect(result.errors[0]).toStrictEqual(
-      invalidEventDirectiveError('edfs__kafkaSubscribe', 'Subscription.entitySubscription', [
-        undefinedEventSubjectsArgumentErrorMessage('invalid'),
-      ]),
-    );
-  });
+        type Mutation {
+          updateEntity(id: ID!, name: String!): edfs__PublishResult! @edfs__rabbitmqPublish(queues: "updateEntity.{{ args.id }}")
+        }
 
-  test('that an error is returned if a Kafka publish subject references a valid argument and an invalid one', () => {
-    const result = normalizeSubgraph(
-      subgraphAM.definitions,
-      subgraphAM.name,
-      undefined,
-      ROUTER_COMPATIBILITY_VERSION_ONE,
-    ) as NormalizationResultFailure;
-    expect(result.success).toBe(false);
-    expect(result.errors).toHaveLength(1);
-    expect(result.errors[0]).toStrictEqual(
-      invalidEventDirectiveError('edfs__kafkaPublish', 'Mutation.entityPublish', [
-        undefinedEventSubjectsArgumentErrorMessage('invalid'),
-      ]),
-    );
-  });
+        type Query {
+          findEntity(id: ID!): Entity! @edfs__rabbitmqSubscribe(queues: ["findEntity.{{ args.id }}"])
+        }
+
+        type Subscription {
+          entitySubscription(id: ID!): Entity! @edfs__rabbitmqSubscribe(queues: ["entities.{{ args.id }}"], providerId: "my-provider")
+          entitySubscriptionTwo(firstID: ID!, secondID: ID!): Entity! @edfs__rabbitmqSubscribe(queues: ["firstSub.{{ args.firstID }}", "secondSub.{{ args.secondID }}"], providerId: "double")
+        }
+
+        type edfs__PublishResult {
+         success: Boolean!
+        }
+
+        scalar openfed__FieldSet
+      `,
+        ),
+      );
+    });
+
+    test('that an error is returned if a RabbitMQ request subject is with a streamConfiguration and there is a wrong definition of edfs__RabbitMQStreamConfiguration', () => {
+      const result = normalizeSubgraph(
+        subgraphAV.definitions,
+        subgraphAV.name,
+        undefined,
+        ROUTER_COMPATIBILITY_VERSION_ONE,
+      ) as NormalizationResultFailure;
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toStrictEqual(
+        invalidEventDrivenGraphError([invalidNatsStreamConfigurationDefinitionErrorMessage]),
+      );
+    });
+
+    test('that no error is returned if a RabbitMQ request subject is without streamConfiguration and there is a wrong definition of edfs__RabbitMQStreamConfiguration', () => {
+      const result = normalizeSubgraph(
+        subgraphRabbitMQ.definitions,
+        subgraphRabbitMQ.name,
+        undefined,
+        ROUTER_COMPATIBILITY_VERSION_ONE,
+      ) as NormalizationResultSuccess;
+      expect(result.success).toBe(true);
+    });
+
+    test('that no error is returned if a RabbitMQ request subject is with a streamConfiguration and there is a correct definition of edfs__RabbitMQStreamConfiguration', () => {
+      const result = normalizeSubgraph(
+        subgraphAS.definitions,
+        subgraphAS.name,
+        undefined,
+        ROUTER_COMPATIBILITY_VERSION_ONE,
+      ) as NormalizationResultSuccess;
+      expect(result.success).toBe(true);
+    });
+
+    test('that an error is returned if a RabbitMQ request subject is with a streamConfiguration and there is a definition of edfs__RabbitMQStreamConfiguration without default consumerInactiveThreshold', () => {
+      const result = normalizeSubgraph(
+        subgraphAT.definitions,
+        subgraphAT.name,
+        undefined,
+        ROUTER_COMPATIBILITY_VERSION_ONE,
+      ) as NormalizationResultFailure;
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toStrictEqual(
+        invalidEventDrivenGraphError([invalidNatsStreamConfigurationDefinitionErrorMessage]),
+      );
+    });
+
+    test('that an error is returned if a RabbitMQ request subject is with a streamConfiguration and there is a definition of edfs__RabbitMQStreamConfiguration with an incorrect consumerInactiveThreshold default value', () => {
+      const result = normalizeSubgraph(
+        subgraphAU.definitions,
+        subgraphAU.name,
+        undefined,
+        ROUTER_COMPATIBILITY_VERSION_ONE,
+      ) as NormalizationResultFailure;
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toStrictEqual(
+        invalidEventDrivenGraphError([invalidNatsStreamConfigurationDefinitionErrorMessage]),
+      );
+    });
+
+    test('that an error is returned if a RabbitMQ subscribe subject references an invalid argument', () => {
+      const result = normalizeSubgraph(
+        subgraphW.definitions,
+        subgraphW.name,
+        undefined,
+        ROUTER_COMPATIBILITY_VERSION_ONE,
+      ) as NormalizationResultFailure;
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toStrictEqual(
+        invalidEventDirectiveError('edfs__rabbitmqSubscribe', 'Subscription.entitySubscription', [
+          undefinedEventSubjectsArgumentErrorMessage('invalid'),
+        ]),
+      );
+    });
+
+    test('that an error is returned if a RabbitMQ request subject references an invalid argument', () => {
+      const result = normalizeSubgraph(
+        subgraphX.definitions,
+        subgraphX.name,
+        undefined,
+        ROUTER_COMPATIBILITY_VERSION_ONE,
+      ) as NormalizationResultFailure;
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toStrictEqual(
+        invalidEventDirectiveError('edfs__rabbitmqRequest', 'Query.entityRequest', [
+          undefinedEventSubjectsArgumentErrorMessage('invalid'),
+        ]),
+      );
+    });
+
+    test('that an error is returned if a RabbitMQ publish subject references an invalid argument', () => {
+      const result = normalizeSubgraph(
+        subgraphY.definitions,
+        subgraphY.name,
+        undefined,
+        ROUTER_COMPATIBILITY_VERSION_ONE,
+      ) as NormalizationResultFailure;
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toStrictEqual(
+        invalidEventDirectiveError('edfs__rabbitmqPublish', 'Mutation.entityPublish', [
+          undefinedEventSubjectsArgumentErrorMessage('invalid'),
+        ]),
+      );
+    });
+
+    test('that an error is returned if a RabbitMQ subscribe subject references two invalid arguments', () => {
+      const result = normalizeSubgraph(
+        subgraphAB.definitions,
+        subgraphAB.name,
+        undefined,
+        ROUTER_COMPATIBILITY_VERSION_ONE,
+      ) as NormalizationResultFailure;
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toStrictEqual(
+        invalidEventDirectiveError('edfs__rabbitmqSubscribe', 'Subscription.entitySubscription', [
+          undefinedEventSubjectsArgumentErrorMessage('invalid'),
+          undefinedEventSubjectsArgumentErrorMessage('alsoinvalid'),
+        ]),
+      );
+    });
+
+    test('that an error is returned if a RabbitMQ request subject references two invalid arguments', () => {
+      const result = normalizeSubgraph(
+        subgraphAC.definitions,
+        subgraphAC.name,
+        undefined,
+        ROUTER_COMPATIBILITY_VERSION_ONE,
+      ) as NormalizationResultFailure;
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toStrictEqual(
+        invalidEventDirectiveError('edfs__rabbitmqRequest', 'Query.entityRequest', [
+          undefinedEventSubjectsArgumentErrorMessage('invalid'),
+          undefinedEventSubjectsArgumentErrorMessage('alsoinvalid'),
+        ]),
+      );
+    });
+
+    test('that an error is returned if a RabbitMQ publish subject references two invalid arguments', () => {
+      const result = normalizeSubgraph(
+        subgraphAD.definitions,
+        subgraphAD.name,
+        undefined,
+        ROUTER_COMPATIBILITY_VERSION_ONE,
+      ) as NormalizationResultFailure;
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toStrictEqual(
+        invalidEventDirectiveError('edfs__rabbitmqPublish', 'Mutation.entityPublish', [
+          undefinedEventSubjectsArgumentErrorMessage('invalid'),
+          undefinedEventSubjectsArgumentErrorMessage('alsoinvalid'),
+        ]),
+      );
+    });
+
+    test('that an error is returned if a RabbitMQ subscribe subject references a valid argument and an invalid one', () => {
+      const result = normalizeSubgraph(
+        subgraphAG.definitions,
+        subgraphAG.name,
+        undefined,
+        ROUTER_COMPATIBILITY_VERSION_ONE,
+      ) as NormalizationResultFailure;
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toStrictEqual(
+        invalidEventDirectiveError('edfs__rabbitmqSubscribe', 'Subscription.entitySubscription', [
+          undefinedEventSubjectsArgumentErrorMessage('invalid'),
+        ]),
+      );
+    });
+
+    test('that an error is returned if a RabbitMQ request subject references a valid argument and an invalid one', () => {
+      const result = normalizeSubgraph(
+        subgraphAH.definitions,
+        subgraphAH.name,
+        undefined,
+        ROUTER_COMPATIBILITY_VERSION_ONE,
+      ) as NormalizationResultFailure;
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toStrictEqual(
+        invalidEventDirectiveError('edfs__rabbitmqRequest', 'Query.entityRequest', [
+          undefinedEventSubjectsArgumentErrorMessage('invalid'),
+        ]),
+      );
+    });
+
+    test('that an error is returned if a RabbitMQ publish subject references a valid argument and an invalid one', () => {
+      const result = normalizeSubgraph(
+        subgraphAI.definitions,
+        subgraphAI.name,
+        undefined,
+        ROUTER_COMPATIBILITY_VERSION_ONE,
+      ) as NormalizationResultFailure;
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toStrictEqual(
+        invalidEventDirectiveError('edfs__rabbitmqPublish', 'Mutation.entityPublish', [
+          undefinedEventSubjectsArgumentErrorMessage('invalid'),
+        ]),
+      );
+    });
 
   describe('Federation tests', () => {
     test('that an error is returned if the subgraph includes fields that are not part of an entity key', () => {
@@ -1087,7 +1787,6 @@ describe('events Configuration tests', () => {
       );
     });
   });
-});
 
 const subgraphA: Subgraph = {
   name: 'subgraph-a',
@@ -1554,6 +2253,7 @@ const subgraphU: Subgraph = {
     type Mutation {
       kafkaMutation: edfs__PublishResult! @edfs__kafkaPublish(topic: "entityAdded", providerId: "myKafka")
       natsMutation(id: ID!): edfs__PublishResult! @edfs__natsPublish(subject: "updateEntity.{{ args.id }}", providerId: "myNats")
+      rabbitmqMutation(id: ID!): edfs__PublishResult! @edfs__rabbitmqPublish(queues: "updateEntity.{{ args.id }}", providerId: "myRabbitMQ")
     }
     
     type Query {
@@ -1562,8 +2262,9 @@ const subgraphU: Subgraph = {
     
     type Subscription {
       kafkaSubscription: Entity! @edfs__kafkaSubscribe(topics: ["entityAdded", "entityUpdated"], providerId: "myKafka")
+      rabbitmqSubscription: Entity! @edfs__rabbitmqSubscribe(queues: ["entityAdded", "entityUpdated"], providerId: "myRabbitMQ")
     }
-    
+
     type edfs__PublishResult {
       success: Boolean!
     }
@@ -1582,6 +2283,33 @@ const subgraphV: Subgraph = {
 
     type Object {
       id: ID!
+    }
+  `),
+};
+
+const subgraphRabbitMQ: Subgraph = {
+  name: 'subgraph-rabbitmq',
+  url: '',
+  definitions: parse(`
+    type Query {
+      findEntity(id: ID!): Entity! @edfs__rabbitmqSubscribe(queues: ["findEntity.{{ args.id }}"])
+    }
+
+    type edfs__PublishResult {
+     success: Boolean!
+    }
+
+    type Mutation {
+      updateEntity(id: ID!, name: String!): edfs__PublishResult! @edfs__rabbitmqPublish(queues: "updateEntity.{{ args.id }}")
+    }
+
+    type Subscription {
+      entitySubscription(id: ID!): Entity! @edfs__rabbitmqSubscribe(queues: ["entities.{{ args.id }}"], providerId: "my-provider")
+      entitySubscriptionTwo(firstID: ID!, secondID: ID!): Entity! @edfs__rabbitmqSubscribe(queues: ["firstSub.{{ args.firstID }}", "secondSub.{{ args.secondID }}"], providerId: "double")
+    }
+
+    type Entity @key(fields: "id", resolvable: false) {
+      id: ID! @external
     }
   `),
 };
@@ -1949,6 +2677,163 @@ const subgraphAR: Subgraph = {
 
     input edfs__NatsStreamConfiguration {
       consumerInactiveThreshold: Int! = 40
+      consumerName: String!
+      streamName: String!
+    }
+  `),
+};
+
+const subgraphAS: Subgraph = {
+  name: 'subgraph-as',
+  url: '',
+  definitions: parse(`
+    type Subscription {
+      entitySubscription(id: ID!): Entity! @edfs__rabbitmqSubscribe(
+        queues: ["entities.{{ args.id }}"],
+        streamConfiguration: {consumerInactiveThreshold: 300, consumerName: "consumer", streamName: "streamName"}
+      )
+    }
+
+    type Entity @key(fields: "id", resolvable: false) {
+      id: ID! @external
+    }
+
+    input edfs__RabbitMQStreamConfiguration {
+      consumerInactiveThreshold: Int! = 30
+      consumerName: String!
+      streamName: String!
+    }
+  `),
+};
+
+const subgraphAT: Subgraph = {
+  name: 'subgraph-at',
+  url: '',
+  definitions: parse(`
+    type Subscription {
+      entitySubscription(id: ID!): Entity! @edfs__rabbitmqSubscribe(
+        queues: ["entities.{{ args.id }}"],
+        streamConfiguration: {consumerInactiveThreshold: 300, consumerName: "consumer", streamName: "streamName"}
+      )
+    }
+
+    type Entity @key(fields: "id", resolvable: false) {
+      id: ID! @external
+    }
+
+    input edfs__RabbitMQStreamConfiguration {
+      consumerInactiveThreshold: Int!
+      consumerName: String!
+      streamName: String!
+    }
+  `),
+};
+
+const subgraphAU: Subgraph = {
+  name: 'subgraph-au',
+  url: '',
+  definitions: parse(`
+    type Subscription {
+      entitySubscription(id: ID!): Entity! @edfs__rabbitmqSubscribe(
+        queues: ["entities.{{ args.id }}"],
+        streamConfiguration: {consumerInactiveThreshold: 300, consumerName: "consumer", streamName: "streamName"}
+      )
+    }
+
+    type Entity @key(fields: "id", resolvable: false) {
+      id: ID! @external
+    }
+
+    input edfs__RabbitMQStreamConfiguration {
+      consumerInactiveThreshold: Int! = 40
+      consumerName: String!
+      streamName: String!
+    }
+  `),
+};
+
+const subgraphAV: Subgraph = {
+  name: 'subgraph-av',
+  url: '',
+  definitions: parse(`
+    type Subscription {
+      entitySubscription(id: ID!): Entity! @edfs__rabbitmqSubscribe(
+        queues: ["entities.{{ args.id }}"],
+        streamConfiguration: {consumerInactiveThreshold: 300, consumerName: "consumer", streamName: "streamName"}
+      )
+    }
+
+    type Entity @key(fields: "id", resolvable: false) {
+      id: ID! @external
+    }
+
+    scalar edfs__RabbitMQStreamConfiguration
+  `),
+};
+
+const subgraphAW: Subgraph = {
+  name: 'subgraph-aw',
+  url: '',
+  definitions: parse(`
+    type Subscription {
+      entitySubscription(id: ID!): Entity! @edfs__rabbitmqSubscribe(
+        queues: ["entities.{{ args.id }}"],
+        streamConfiguration: { consumerName: "consumerName", consumerName: "hello", invalidField: 1 }
+      )
+    }
+
+    type Entity @key(fields: "id", resolvable: false) {
+      id: ID! @external
+    }
+
+    input edfs__RabbitMQStreamConfiguration {
+      consumerInactiveThreshold: Int! = 30
+      consumerName: String!
+      streamName: String!
+    }
+  `),
+};
+
+const subgraphAX: Subgraph = {
+  name: 'subgraph-ax',
+  url: '',
+  definitions: parse(`
+    type Subscription {
+      entitySubscription(id: ID!): Entity! @edfs__rabbitmqSubscribe(
+        queues: ["entities.{{ args.id }}"],
+        streamConfiguration: { consumerName: 1, streamName: "", }
+      )
+    }
+
+    type Entity @key(fields: "id", resolvable: false) {
+      id: ID! @external
+    }
+
+    input edfs__RabbitMQStreamConfiguration {
+      consumerInactiveThreshold: Int! = 30
+      consumerName: String!
+      streamName: String!
+    }
+  `),
+};
+
+const subgraphAY: Subgraph = {
+  name: 'subgraph-ay',
+  url: '',
+  definitions: parse(`
+    type Subscription {
+      entitySubscription(id: ID!): Entity! @edfs__rabbitmqSubscribe(
+        queues: ["entities.{{ args.id }}"],
+        streamConfiguration: { invalidFieldOne: 1, invalidFieldTwo: "test", }
+      )
+    }
+
+    type Entity @key(fields: "id", resolvable: false) {
+      id: ID! @external
+    }
+
+    input edfs__RabbitMQStreamConfiguration {
+      consumerInactiveThreshold: Int! = 30
       consumerName: String!
       streamName: String!
     }

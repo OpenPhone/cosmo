@@ -516,9 +516,15 @@ type KafkaEventSource struct {
 	TLS            *KafkaTLSConfiguration `yaml:"tls,omitempty"`
 }
 
+type RabbitMQEventSource struct {
+	ID  string `yaml:"id,omitempty"`
+	URL string `yaml:"url,omitempty"`
+}
+
 type EventProviders struct {
-	Nats  []NatsEventSource  `yaml:"nats,omitempty"`
-	Kafka []KafkaEventSource `yaml:"kafka,omitempty"`
+	Nats     []NatsEventSource     `yaml:"nats,omitempty"`
+	Kafka    []KafkaEventSource    `yaml:"kafka,omitempty"`
+	RabbitMQ []RabbitMQEventSource `yaml:"rabbitmq,omitempty"`
 }
 
 type EventsConfiguration struct {

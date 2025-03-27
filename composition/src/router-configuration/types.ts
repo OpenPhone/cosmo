@@ -2,6 +2,8 @@ export type NatsEventType = 'subscribe' | 'publish' | 'request';
 
 export type KafkaEventType = 'subscribe' | 'publish';
 
+export type RabbitMQEventType = 'subscribe' | 'publish';
+
 export type StreamConfiguration = {
   consumerInactiveThreshold: number;
   consumerName: string;
@@ -25,7 +27,15 @@ export type NatsEventConfiguration = {
   streamConfiguration?: StreamConfiguration;
 };
 
-export type EventConfiguration = KafkaEventConfiguration | NatsEventConfiguration;
+export type RabbitMQEventConfiguration = {
+  fieldName: string;
+  providerId: string;
+  providerType: 'rabbitmq';
+  queues: string[];
+  type: RabbitMQEventType;
+};
+
+export type EventConfiguration = KafkaEventConfiguration | NatsEventConfiguration | RabbitMQEventConfiguration;
 
 export type SubscriptionFilterValue = boolean | null | number | string;
 

@@ -56,6 +56,7 @@ import {
   CONFIGURE_CHILD_DESCRIPTIONS_DEFINITION,
   CONFIGURE_DESCRIPTION_DEFINITION,
   EDFS_NATS_STREAM_CONFIGURATION_DEFINITION,
+  EDFS_RABBITMQ_STREAM_CONFIGURATION_DEFINITION,
   EVENT_DRIVEN_DIRECTIVE_DEFINITIONS_BY_DIRECTIVE_NAME,
   FIELD_SET_SCALAR_DEFINITION,
   LINK_DEFINITION,
@@ -131,6 +132,9 @@ import {
   invalidNatsStreamConfigurationDefinitionErrorMessage,
   invalidNatsStreamInputErrorMessage,
   invalidNatsStreamInputFieldsErrorMessage,
+  invalidRabbitMQStreamConfigurationDefinitionErrorMessage,
+  invalidRabbitMQStreamInputErrorMessage,
+  invalidRabbitMQStreamInputFieldsErrorMessage,
   invalidProvidesOrRequiresDirectivesError,
   invalidRepeatedDirectiveErrorMessage,
   invalidRootTypeDefinitionError,
@@ -273,6 +277,8 @@ import {
   DESCRIPTION_OVERRIDE,
   EDFS_KAFKA_PUBLISH,
   EDFS_KAFKA_SUBSCRIBE,
+  EDFS_RABBITMQ_PUBLISH,
+  EDFS_RABBITMQ_SUBSCRIBE,
   EDFS_NATS_PUBLISH,
   EDFS_NATS_REQUEST,
   EDFS_NATS_STREAM_CONFIGURATION,
@@ -307,6 +313,7 @@ import {
   PROVIDER_ID,
   PROVIDER_TYPE_KAFKA,
   PROVIDER_TYPE_NATS,
+  PROVIDER_TYPE_RABBITMQ,
   PUBLISH,
   QUERY,
   REQUEST,
@@ -332,6 +339,8 @@ import {
   SUCCESS,
   TOPIC,
   TOPICS,
+  QUEUES,
+  EDFS_RABBITMQ_STREAM_CONFIGURATION,
 } from '../../utils/string-constants';
 import { MAX_INT32 } from '../../utils/integer-constants';
 import {
@@ -423,6 +432,7 @@ export class NormalizationFactory {
   subgraphName: string;
   unvalidatedExternalFieldCoords = new Set<string>();
   usesEdfsNatsStreamConfiguration: boolean = false;
+  usesEdfsRabbitMQStreamConfiguration: boolean = false;
   warnings: Warning[] = [];
 
   constructor(internalGraph: Graph, subgraphName?: string) {
@@ -2299,6 +2309,180 @@ export class NormalizationFactory {
     };
   }
 
+  getRabbitMQPublishConfiguration(
+    directive: ConstDirectiveNode,
+    argumentDataByArgumentName: Map<string, InputValueData>,
+    fieldName: string,
+    errorMessages: string[],
+  ): EventConfiguration | undefined {
+    const queues: string[] = [];
+    let providerId = DEFAULT_EDFS_PROVIDER_ID;
+    for (const argumentNode of directive.arguments || []) {
+      switch (argumentNode.name.value) {
+        case QUEUES: {
+          if (argumentNode.value.kind !== Kind.STRING || argumentNode.value.value.length < 1) {
+            errorMessages.push(invalidEventSubjectErrorMessage(QUEUES));
+            continue;
+          }
+          validateArgumentTemplateReferences(argumentNode.value.value, argumentDataByArgumentName, errorMessages);
+          queues.push(argumentNode.value.value);
+          break;
+        }
+        case PROVIDER_ID: {
+          if (argumentNode.value.kind !== Kind.STRING || argumentNode.value.value.length < 1) {
+            errorMessages.push(invalidEventProviderIdErrorMessage);
+            continue;
+          }
+          providerId = argumentNode.value.value;
+          break;
+        }
+      }
+    }
+    if (errorMessages.length > 0) {
+      return;
+    }
+    return { fieldName, providerId, providerType: PROVIDER_TYPE_RABBITMQ, queues, type: PUBLISH };
+  }
+
+  getRabbitMQSubscribeConfiguration(
+    directive: ConstDirectiveNode,
+    argumentDataByArgumentName: Map<string, InputValueData>,
+    fieldName: string,
+    errorMessages: string[],
+  ): EventConfiguration | undefined {
+    const queues: string[] = [];
+    let providerId = DEFAULT_EDFS_PROVIDER_ID;
+    let consumerInactiveThreshold = DEFAULT_CONSUMER_INACTIVE_THRESHOLD;
+    let consumerName = '';
+    let streamName = '';
+    for (const argumentNode of directive.arguments || []) {
+      switch (argumentNode.name.value) {
+        case QUEUES: {
+          //@TODO list coercion
+          if (argumentNode.value.kind !== Kind.LIST) {
+            errorMessages.push(invalidEventSubjectsErrorMessage(QUEUES));
+            continue;
+          }
+          for (const value of argumentNode.value.values) {
+            if (value.kind !== Kind.STRING || value.value.length < 1) {
+              errorMessages.push(invalidEventSubjectsItemErrorMessage(QUEUES));
+              break;
+            }
+            validateArgumentTemplateReferences(value.value, argumentDataByArgumentName, errorMessages);
+            queues.push(value.value);
+          }
+          break;
+        }
+        case PROVIDER_ID: {
+          if (argumentNode.value.kind !== Kind.STRING || argumentNode.value.value.length < 1) {
+            errorMessages.push(invalidEventProviderIdErrorMessage);
+            continue;
+          }
+          providerId = argumentNode.value.value;
+          break;
+        }
+        case STREAM_CONFIGURATION: {
+          this.usesEdfsRabbitMQStreamConfiguration = true;
+          if (argumentNode.value.kind !== Kind.OBJECT || argumentNode.value.fields.length < 1) {
+            errorMessages.push(invalidRabbitMQStreamInputErrorMessage);
+            continue;
+          }
+          let isValid = true;
+          const invalidFieldNames = new Set<string>();
+          const allowedFieldNames = new Set(STREAM_CONFIGURATION_FIELD_NAMES);
+          const missingRequiredFieldNames = new Set<string>([CONSUMER_NAME, STREAM_NAME]);
+          const duplicateFieldNames = new Set<string>();
+          const invalidRequiredFieldNames = new Set<string>();
+          for (const field of argumentNode.value.fields) {
+            const fieldName = field.name.value;
+            if (!STREAM_CONFIGURATION_FIELD_NAMES.has(fieldName)) {
+              invalidFieldNames.add(fieldName);
+              isValid = false;
+              continue;
+            }
+            if (allowedFieldNames.has(fieldName)) {
+              allowedFieldNames.delete(fieldName);
+            } else {
+              duplicateFieldNames.add(fieldName);
+              isValid = false;
+              continue;
+            }
+            if (missingRequiredFieldNames.has(fieldName)) {
+              missingRequiredFieldNames.delete(fieldName);
+            }
+            switch (fieldName) {
+              case CONSUMER_NAME:
+                if (field.value.kind != Kind.STRING || field.value.value.length < 1) {
+                  invalidRequiredFieldNames.add(fieldName);
+                  isValid = false;
+                  continue;
+                }
+                consumerName = field.value.value;
+                break;
+              case STREAM_NAME:
+                if (field.value.kind != Kind.STRING || field.value.value.length < 1) {
+                  invalidRequiredFieldNames.add(fieldName);
+                  isValid = false;
+                  continue;
+                }
+                streamName = field.value.value;
+                break;
+              case CONSUMER_INACTIVE_THRESHOLD:
+                if (field.value.kind != Kind.INT) {
+                  errorMessages.push(
+                    invalidArgumentValueErrorMessage(
+                      print(field.value),
+                      'edfs__RabbitMQStreamConfiguration',
+                      `consumerInactiveThreshold`,
+                      INT_SCALAR,
+                    ),
+                  );
+                  isValid = false;
+                  continue;
+                }
+
+                // It should not be possible for this to error
+                try {
+                  consumerInactiveThreshold = parseInt(field.value.value, 10);
+                } catch (e) {
+                  errorMessages.push(
+                    invalidArgumentValueErrorMessage(
+                      print(field.value),
+                      'edfs__RabbitMQStreamConfiguration',
+                      `consumerInactiveThreshold`,
+                      INT_SCALAR,
+                    ),
+                  );
+                  isValid = false;
+                }
+                break;
+            }
+          }
+          if (!isValid || missingRequiredFieldNames.size > 0) {
+            errorMessages.push(
+              invalidRabbitMQStreamInputFieldsErrorMessage(
+                [...missingRequiredFieldNames],
+                [...duplicateFieldNames],
+                [...invalidRequiredFieldNames],
+                [...invalidFieldNames],
+              ),
+            );
+          }
+        }
+      }
+    }
+    if (errorMessages.length > 0) {
+      return;
+    }
+    return {
+      fieldName,
+      providerId,
+      providerType: PROVIDER_TYPE_RABBITMQ,
+      queues,
+      type: SUBSCRIBE,
+    };
+  }
+
   getNatsPublishAndRequestConfiguration(
     eventType: NatsEventType,
     directive: ConstDirectiveNode,
@@ -2577,6 +2761,24 @@ export class NormalizationFactory {
           );
           break;
         }
+        case EDFS_RABBITMQ_PUBLISH: {
+          eventConfiguration = this.getRabbitMQPublishConfiguration(
+            directive,
+            argumentDataByArgumentName,
+            fieldName,
+            errorMessages,
+          );
+          break;
+        }
+        case EDFS_RABBITMQ_SUBSCRIBE: {
+          eventConfiguration = this.getRabbitMQSubscribeConfiguration(
+            directive,
+            argumentDataByArgumentName,
+            fieldName,
+            errorMessages,
+          );
+          break;
+        }
         default:
           continue;
       }
@@ -2602,11 +2804,11 @@ export class NormalizationFactory {
   getValidEventsDirectiveNamesForOperationTypeNode(operationTypeNode: OperationTypeNode): Set<string> {
     switch (operationTypeNode) {
       case OperationTypeNode.MUTATION:
-        return new Set<string>([EDFS_KAFKA_PUBLISH, EDFS_NATS_PUBLISH, EDFS_NATS_REQUEST]);
+        return new Set<string>([EDFS_KAFKA_PUBLISH, EDFS_RABBITMQ_PUBLISH, EDFS_NATS_PUBLISH, EDFS_NATS_REQUEST]);
       case OperationTypeNode.QUERY:
         return new Set<string>([EDFS_NATS_REQUEST]);
       case OperationTypeNode.SUBSCRIPTION:
-        return new Set<string>([EDFS_KAFKA_SUBSCRIBE, EDFS_NATS_SUBSCRIBE]);
+        return new Set<string>([EDFS_KAFKA_SUBSCRIBE, EDFS_RABBITMQ_SUBSCRIBE, EDFS_NATS_SUBSCRIBE]);
     }
   }
 
@@ -2779,6 +2981,44 @@ export class NormalizationFactory {
     return true;
   }
 
+  isRabbitMQStreamConfigurationInputObjectValid(streamConfigurationInputData: ParentDefinitionData): boolean {
+    if (streamConfigurationInputData.kind !== Kind.INPUT_OBJECT_TYPE_DEFINITION) {
+      return false;
+    }
+    if (streamConfigurationInputData.inputValueDataByValueName.size != 3) {
+      return false;
+    }
+    for (const [inputValueName, inputValueData] of streamConfigurationInputData.inputValueDataByValueName) {
+      switch (inputValueName) {
+        case CONSUMER_INACTIVE_THRESHOLD: {
+          if (printTypeNode(inputValueData.type) !== NON_NULLABLE_INT) {
+            return false;
+          }
+          if (
+            !inputValueData.defaultValue ||
+            inputValueData.defaultValue.kind !== Kind.INT ||
+            inputValueData.defaultValue.value !== `${DEFAULT_CONSUMER_INACTIVE_THRESHOLD}`
+          ) {
+            return false;
+          }
+          break;
+        }
+        case CONSUMER_NAME:
+        // intentional fallthrough
+        case STREAM_NAME: {
+          if (printTypeNode(inputValueData.type) !== NON_NULLABLE_STRING) {
+            return false;
+          }
+          break;
+        }
+        default: {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
   validateEventDrivenSubgraph(definitions: Array<DefinitionNode>) {
     const errorMessages: string[] = [];
     const invalidEventsDirectiveDataByRootFieldPath = new Map<string, InvalidRootTypeFieldEventsDirectiveData>();
@@ -2790,8 +3030,8 @@ export class NormalizationFactory {
     const nonEntityExtensionTypeNames = new Set<string>();
     const invalidObjectTypeNames = new Set<string>();
     for (const [typeName, data] of this.parentDefinitionDataByTypeName) {
-      // validate edfs__PublishResult and edfs__NatsStreamConfiguration separately
-      if (typeName === EDFS_PUBLISH_RESULT || typeName === EDFS_NATS_STREAM_CONFIGURATION) {
+      // validate edfs__PublishResult, edfs__NatsStreamConfiguration, and edfs__RabbitMQStreamConfiguration separately
+      if (typeName === EDFS_PUBLISH_RESULT || typeName === EDFS_NATS_STREAM_CONFIGURATION || typeName === EDFS_RABBITMQ_STREAM_CONFIGURATION) {
         continue;
       }
       if (data.kind !== Kind.OBJECT_TYPE_DEFINITION) {
@@ -2835,6 +3075,21 @@ export class NormalizationFactory {
       // always add the correct definition to the schema regardless
       this.parentDefinitionDataByTypeName.delete(EDFS_NATS_STREAM_CONFIGURATION);
       definitions.push(EDFS_NATS_STREAM_CONFIGURATION_DEFINITION);
+    }
+
+    if (this.edfsDirectiveReferences.has(EDFS_RABBITMQ_SUBSCRIBE)) {
+      const streamConfigurationInputData = this.parentDefinitionDataByTypeName.get(EDFS_RABBITMQ_STREAM_CONFIGURATION);
+      if (
+        streamConfigurationInputData &&
+        this.usesEdfsRabbitMQStreamConfiguration &&
+        !this.isRabbitMQStreamConfigurationInputObjectValid(streamConfigurationInputData)
+      ) {
+        errorMessages.push(invalidRabbitMQStreamConfigurationDefinitionErrorMessage);
+      }
+
+      // always add the correct definition to the schema regardless
+      this.parentDefinitionDataByTypeName.delete(EDFS_RABBITMQ_STREAM_CONFIGURATION);
+      definitions.push(EDFS_RABBITMQ_STREAM_CONFIGURATION_DEFINITION);
     }
 
     if (this.referencedDirectiveNames.has(LINK)) {

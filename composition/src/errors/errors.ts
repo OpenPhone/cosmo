@@ -981,6 +981,10 @@ export const invalidNatsStreamInputErrorMessage =
   `The "streamConfiguration" argument must be a valid input object with the following form:\n` +
   `  input edfs__NatsStreamConfiguration {\n    consumerInactiveThreshold: Int! = 30\n    consumerName: String!\n    streamName: String!\n  }`;
 
+export const invalidRabbitMQStreamInputErrorMessage =
+  `The "streamConfiguration" argument must be a valid input object with the following form:\n` +
+  `  input edfs__RabbitMQStreamConfiguration {\n    consumerInactiveThreshold: Int! = 30\n    consumerName: String!\n    streamName: String!\n  }`;
+
 export function invalidNatsStreamInputFieldsErrorMessage(
   missingRequiredFieldNames: string[],
   duplicateRequiredFieldNames: string[],
@@ -1021,6 +1025,58 @@ export function invalidNatsStreamInputFieldsErrorMessage(
       `The following field` +
         (invalidFieldNames.length > 1 ? `s are` : ` is`) +
         ` not part of a valid "edfs__NatsStreamConfiguration" input definition: "` +
+        invalidFieldNames.join(QUOTATION_JOIN) +
+        `".`,
+    );
+  }
+  message +=
+    `\n However, the provided input was invalid for the following reason` +
+    (errorMessages.length > 1 ? `s` : ``) +
+    `:\n  ` +
+    errorMessages.join(`\n  `);
+  return message;
+}
+
+export function invalidRabbitMQStreamInputFieldsErrorMessage(
+  missingRequiredFieldNames: string[],
+  duplicateRequiredFieldNames: string[],
+  invalidRequiredFieldNames: string[],
+  invalidFieldNames: string[],
+): string {
+  let message = invalidRabbitMQStreamInputErrorMessage;
+  const errorMessages: string[] = [];
+  if (missingRequiredFieldNames.length > 0) {
+    errorMessages.push(
+      `The following required field` +
+        (missingRequiredFieldNames.length > 1 ? `s were` : ` was`) +
+        ` not defined: "` +
+        missingRequiredFieldNames.join(QUOTATION_JOIN) +
+        `".`,
+    );
+  }
+  if (duplicateRequiredFieldNames.length > 0) {
+    errorMessages.push(
+      `The following required field` +
+        (duplicateRequiredFieldNames.length > 1 ? `s were` : ` was`) +
+        ` defined more than once: "` +
+        duplicateRequiredFieldNames.join(QUOTATION_JOIN) +
+        `".`,
+    );
+  }
+  if (invalidRequiredFieldNames.length > 0) {
+    errorMessages.push(
+      `The following required field` +
+        (invalidRequiredFieldNames.length > 1 ? `s were` : ` was`) +
+        ` not type "String!" with a minimum length of 1: "` +
+        invalidRequiredFieldNames.join(QUOTATION_JOIN) +
+        `".`,
+    );
+  }
+  if (invalidFieldNames.length > 0) {
+    errorMessages.push(
+      `The following field` +
+        (invalidFieldNames.length > 1 ? `s are` : ` is`) +
+        ` not part of a valid "edfs__RabbitMQStreamConfiguration" input definition: "` +
         invalidFieldNames.join(QUOTATION_JOIN) +
         `".`,
     );
@@ -1104,6 +1160,11 @@ export const invalidEdfsPublishResultObjectErrorMessage =
 export const invalidNatsStreamConfigurationDefinitionErrorMessage =
   ` The input object "edfs__NatsStreamConfiguration" that was defined in the Event Driven graph is invalid and must` +
   ` instead have the following definition:\n  input edfs__NatsStreamConfiguration {\n   consumerInactiveThreshold: Int! = 30\n` +
+  `   consumerName: String!\n   streamName: String!\n  }`;
+
+export const invalidRabbitMQStreamConfigurationDefinitionErrorMessage =
+  ` The input object "edfs__RabbitMQStreamConfiguration" that was defined in the Event Driven graph is invalid and must` +
+  ` instead have the following definition:\n  input edfs__RabbitMQStreamConfiguration {\n   consumerInactiveThreshold: Int! = 30\n` +
   `   consumerName: String!\n   streamName: String!\n  }`;
 
 export function invalidEdfsDirectiveName(directiveName: string): Error {
