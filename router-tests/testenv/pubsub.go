@@ -3,6 +3,7 @@ package testenv
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/ory/dockertest/v3"
 	"github.com/ory/dockertest/v3/docker"
+	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/twmb/franz-go/pkg/kgo"
 	nodev1 "github.com/wundergraph/cosmo/router/gen/proto/wg/cosmo/node/v1"
 )
@@ -238,6 +240,117 @@ func addPubSubPrefixToEngineConfiguration(engineConfig *nodev1.EngineConfigurati
 				}
 				customEvents.Kafka[kafkaConfig].Topics = prefixedTopics
 			}
+			for rabbitMQConfig := range customEvents.Rabbitmq {
+				var prefixedQueues []string
+				for _, queue := range customEvents.Rabbitmq[rabbitMQConfig].Queues {
+					prefixedQueues = append(prefixedQueues, getPubSubName(queue))
+				}
+				customEvents.Rabbitmq[rabbitMQConfig].Queues = prefixedQueues
+			}
 		}
 	}
+}
+
+type RabbitMQData struct {
+	Connection *amqp.Connection
+	URL        string
+	Resource   *dockertest.Resource
+}
+
+var (
+	rabbitmqMux    sync.Mutex
+	rabbitmqRefs   int32
+	rabbitmqData   *RabbitMQData
+	rabbitmqServer *dockertest.Resource
+)
+
+func setupRabbitMQServer(t testing.TB) (*RabbitMQData, error) {
+	rabbitmqMux.Lock()
+	defer rabbitmqMux.Unlock()
+
+	log.Printf("[DEBUG] setupRabbitMQServer: Start (refs: %d)", rabbitmqRefs)
+	rabbitmqRefs += 1
+
+	t.Cleanup(func() {
+		rabbitmqMux.Lock()
+		defer rabbitmqMux.Unlock()
+
+		log.Printf("[DEBUG] RabbitMQ cleanup (refs: %d)", rabbitmqRefs)
+		if rabbitmqRefs > 1 {
+			rabbitmqRefs -= 1
+		} else {
+			if err := rabbitmqServer.Close(); err != nil {
+				t.Fatalf("could not purge rabbitmq container: %s", err.Error())
+			}
+			// This shouldn't be needed, but just in case
+			log.Printf("[DEBUG] RabbitMQ resetting data and server")
+			rabbitmqData = nil
+			rabbitmqServer = nil
+			rabbitmqRefs = 0
+		}
+	})
+
+	if rabbitmqData != nil {
+		log.Printf("[DEBUG] Returning existing RabbitMQ data")
+		return rabbitmqData, nil
+	}
+
+	log.Printf("[DEBUG] Setting up new RabbitMQ server")
+	rabbitmqData = &RabbitMQData{}
+
+	pool, err := dockertest.NewPool("")
+	if err != nil {
+		log.Printf("[ERROR] Could not connect to docker: %s", err)
+		return nil, err
+	}
+
+	if err := pool.Client.Ping(); err != nil {
+		log.Printf("[ERROR] Could not ping docker client: %s", err)
+		return nil, err
+	}
+
+	port := freeport.GetOne(t)
+	log.Printf("[DEBUG] Using port %d for RabbitMQ", port)
+
+	// Run RabbitMQ container
+	container, err := pool.RunWithOptions(&dockertest.RunOptions{
+		Repository: "rabbitmq",
+		Tag:        "3-management",
+		PortBindings: map[docker.Port][]docker.PortBinding{
+			"5672/tcp": {docker.PortBinding{HostIP: "localhost", HostPort: strconv.Itoa(port)}},
+		},
+		Env: []string{
+			"RABBITMQ_DEFAULT_USER=guest",
+			"RABBITMQ_DEFAULT_PASS=guest",
+		},
+	})
+	if err != nil {
+		log.Printf("[ERROR] Could not start RabbitMQ container: %s", err)
+		return nil, err
+	}
+
+	amqpURL := fmt.Sprintf("amqp://guest:guest@localhost:%s/", container.GetPort("5672/tcp"))
+	log.Printf("[DEBUG] RabbitMQ AMQP URL: %s", amqpURL)
+
+	// Wait for RabbitMQ to be ready
+	err = pool.Retry(func() error {
+		conn, dialErr := amqp.Dial(amqpURL)
+		if dialErr != nil {
+			log.Printf("[DEBUG] Waiting for RabbitMQ to be ready: %s", dialErr)
+			return dialErr
+		}
+		log.Printf("[DEBUG] RabbitMQ connection successful")
+		rabbitmqData.Connection = conn
+		return nil
+	})
+	if err != nil {
+		log.Printf("[ERROR] Could not connect to RabbitMQ: %s", err)
+		t.Fatalf("could not connect to rabbitmq: %s", err.Error())
+	}
+
+	rabbitmqData.URL = amqpURL
+	rabbitmqServer = container
+	log.Printf("[DEBUG] RabbitMQ setup completed successfully")
+
+	return rabbitmqData, nil
 }

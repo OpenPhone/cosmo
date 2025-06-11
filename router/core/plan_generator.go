@@ -178,7 +178,7 @@ func (pg *PlanGenerator) loadConfiguration(routerConfig *nodev1.RouterConfig, lo
 				kafkaSources[providerId] = nil
 			}
 		}
-		for _, rabbitMQConfig := range ds.GetCustomEvents().GetRabbitMQ() {
+		for _, rabbitMQConfig := range ds.GetCustomEvents().GetRabbitmq() {
 			providerId := rabbitMQConfig.GetEngineEventConfiguration().GetProviderId()
 			if _, ok := rabbitMQSources[providerId]; !ok {
 				rabbitMQSources[providerId] = nil

@@ -22,7 +22,7 @@ type RabbitMQConnector interface {
 
 // RabbitMQPubSub is the interface for RabbitMQ pubsub operations
 type RabbitMQPubSub interface {
-	// Subscribe subscribes to the given queues and updates the subscription updater
+	// Subscribe subscribes to the given queues and/or exchanges and updates the subscription updater
 	Subscribe(ctx context.Context, event pubsub_datasource.RabbitMQSubscriptionEventConfiguration, updater resolve.SubscriptionUpdater) error
 	// Publish publishes the given event to the RabbitMQ queue
 	Publish(ctx context.Context, event pubsub_datasource.RabbitMQPublishEventConfiguration) error
@@ -153,25 +153,54 @@ func (p *rabbitMQPubSub) queueConsumer(ctx context.Context, queueName string, up
 	}
 }
 
-// Subscribe subscribes to the given queues and updates the subscription updater
+// Subscribe subscribes to the given queues and/or exchanges and updates the subscription updater
 func (p *rabbitMQPubSub) Subscribe(ctx context.Context, event pubsub_datasource.RabbitMQSubscriptionEventConfiguration, updater resolve.SubscriptionUpdater) error {
 	log := p.logger.With(
 		zap.String("provider_id", event.ProviderID),
 		zap.String("method", "subscribe"),
-		zap.Strings("queues", event.Queues),
+		zap.String("exchange", event.Exchange),
+		zap.String("routing_key", event.RoutingKey),
+		zap.Strings("queue", event.Queues),
 	)
 
-	log.Debug("subscribe")
+	if len(event.Queues) > 0 {
+		log = log.With(zap.Strings("queues", event.Queues))
+		log.Debug("subscribe to queues")
 
-	for _, queueName := range event.Queues {
-		queueName := queueName // Create a new variable for the goroutine
+		for _, queueName := range event.Queues {
+			queueName := queueName // Create a new variable for the goroutine
+
+			p.closeWg.Add(1)
+
+			go func() {
+				defer p.closeWg.Done()
+
+				err := p.queueConsumer(ctx, queueName, updater)
+				if err != nil {
+					if errors.Is(err, errChannelClosed) || errors.Is(err, context.Canceled) {
+						log.Debug("consumer canceled", zap.Error(err))
+					} else {
+						log.Error("consumer error", zap.Error(err))
+					}
+					return
+				}
+			}()
+		}
+	}
+
+	if event.Exchange != "" && event.RoutingKey != "" {
+		log = log.With(
+			zap.String("exchange", event.Exchange),
+			zap.String("routing_key", event.RoutingKey),
+		)
+		log.Debug("subscribe to exchange")
 
 		p.closeWg.Add(1)
 
 		go func() {
 			defer p.closeWg.Done()
 
-			err := p.queueConsumer(ctx, queueName, updater)
+			err := p.exchangeConsumer(ctx, event.Exchange, event.RoutingKey, updater)
 			if err != nil {
 				if errors.Is(err, errChannelClosed) || errors.Is(err, context.Canceled) {
 					log.Debug("consumer canceled", zap.Error(err))
@@ -186,55 +215,185 @@ func (p *rabbitMQPubSub) Subscribe(ctx context.Context, event pubsub_datasource.
 	return nil
 }
 
-// Publish publishes the given event to the RabbitMQ queue in a non-blocking way
+// exchangeConsumer consumes messages from a RabbitMQ exchange with the given routing key and calls the updateTriggers function
+func (p *rabbitMQPubSub) exchangeConsumer(ctx context.Context, exchange, routingKey string, updater resolve.SubscriptionUpdater) error {
+	channelKey := "exchange:" + exchange
+	ch, err := p.getChannel(channelKey)
+	if err != nil {
+		return err
+	}
+
+	// Declare the exchange
+	err = ch.ExchangeDeclare(
+		exchange, // name
+		"topic",  // type (using topic as it's the most versatile)
+		true,     // durable
+		false,    // auto-deleted
+		false,    // internal
+		false,    // no-wait
+		nil,      // arguments
+	)
+	if err != nil {
+		return fmt.Errorf("failed to declare exchange: %w", err)
+	}
+
+	// Create a temporary queue for the subscription
+	q, err := ch.QueueDeclare(
+		"",    // name (empty means let the server generate a name)
+		false, // durable
+		true,  // delete when unused
+		true,  // exclusive
+		false, // no-wait
+		nil,   // arguments
+	)
+	if err != nil {
+		return fmt.Errorf("failed to declare queue: %w", err)
+	}
+
+	// Bind the queue to the exchange with the routing key
+	err = ch.QueueBind(
+		q.Name,     // queue name
+		routingKey, // routing key
+		exchange,   // exchange
+		false,      // no-wait
+		nil,        // arguments
+	)
+	if err != nil {
+		return fmt.Errorf("failed to bind queue: %w", err)
+	}
+
+	// Set up the consumer
+	msgs, err := ch.Consume(
+		q.Name, // queue
+		"",     // consumer
+		true,   // auto-ack
+		false,  // exclusive
+		false,  // no-local
+		false,  // no-wait
+		nil,    // args
+	)
+	if err != nil {
+		return fmt.Errorf("failed to register consumer: %w", err)
+	}
+
+	for {
+		select {
+		case <-p.ctx.Done(): // Close the consumer if the application context was canceled
+			return p.ctx.Err()
+		case <-ctx.Done(): // Close the consumer if the subscription context was canceled
+			return ctx.Err()
+		case msg, ok := <-msgs:
+			if !ok {
+				return errChannelClosed
+			}
+			p.logger.Debug("subscription update",
+				zap.String("exchange", exchange),
+				zap.String("routing_key", routingKey),
+				zap.ByteString("data", msg.Body))
+			updater.Update(msg.Body)
+		}
+	}
+}
+
+// Publish publishes the given event to the RabbitMQ queue or exchange in a non-blocking way
 func (p *rabbitMQPubSub) Publish(ctx context.Context, event pubsub_datasource.RabbitMQPublishEventConfiguration) error {
 	log := p.logger.With(
 		zap.String("provider_id", event.ProviderID),
 		zap.String("method", "publish"),
-		zap.String("queue", event.Queue),
 	)
+
+	// Use a unique channel key based on queue or exchange
+	channelKey := event.Queue
+	if event.Exchange != "" {
+		channelKey = "exchange:" + event.Exchange
+	}
+
+	log = log.With(zap.String("channel_key", channelKey))
+
+	if event.Exchange != "" {
+		log = log.With(
+			zap.String("exchange", event.Exchange),
+			zap.String("routing_key", event.RoutingKey),
+		)
+	} else {
+		log = log.With(zap.String("queue", event.Queue))
+	}
 
 	log.Debug("publish", zap.ByteString("data", event.Data))
 
-	ch, err := p.getChannel(event.Queue)
+	ch, err := p.getChannel(channelKey)
 	if err != nil {
 		log.Error("failed to get channel", zap.Error(err))
-		return pubsub.NewError(fmt.Sprintf("error getting channel for queue %s", event.Queue), err)
-	}
-
-	// Declare the queue to ensure it exists
-	q, err := ch.QueueDeclare(
-		event.Queue, // name
-		true,        // durable
-		false,       // delete when unused
-		false,       // exclusive
-		false,       // no-wait
-		nil,         // arguments
-	)
-	if err != nil {
-		log.Error("failed to declare queue", zap.Error(err))
-		return pubsub.NewError(fmt.Sprintf("error declaring queue %s", event.Queue), err)
+		return pubsub.NewError(fmt.Sprintf("error getting channel for %s", channelKey), err)
 	}
 
 	// Set a timeout for the publish operation
 	publishCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	// Publish the message
-	err = ch.PublishWithContext(
-		publishCtx,
-		"",     // exchange
-		q.Name, // routing key
-		false,  // mandatory
-		false,  // immediate
-		amqp.Publishing{
-			ContentType: "application/json",
-			Body:        event.Data,
-		},
-	)
-	if err != nil {
-		log.Error("publish error", zap.Error(err))
-		return pubsub.NewError(fmt.Sprintf("error publishing to RabbitMQ queue %s", event.Queue), err)
+	if event.Exchange != "" {
+		// Declare the exchange if it's specified
+		err = ch.ExchangeDeclare(
+			event.Exchange, // name
+			"topic",        // type (using topic as it's the most versatile)
+			true,           // durable
+			false,          // auto-deleted
+			false,          // internal
+			false,          // no-wait
+			nil,            // arguments
+		)
+		if err != nil {
+			log.Error("failed to declare exchange", zap.Error(err))
+			return pubsub.NewError(fmt.Sprintf("error declaring exchange %s", event.Exchange), err)
+		}
+
+		// Publish to exchange with routing key
+		err = ch.PublishWithContext(
+			publishCtx,
+			event.Exchange,   // exchange
+			event.RoutingKey, // routing key
+			false,            // mandatory
+			false,            // immediate
+			amqp.Publishing{
+				ContentType: "application/json",
+				Body:        event.Data,
+			},
+		)
+		if err != nil {
+			log.Error("publish error", zap.Error(err))
+			return pubsub.NewError(fmt.Sprintf("error publishing to RabbitMQ exchange %s", event.Exchange), err)
+		}
+	} else {
+		// Declare the queue to ensure it exists
+		q, err := ch.QueueDeclare(
+			event.Queue, // name
+			true,        // durable
+			false,       // delete when unused
+			false,       // exclusive
+			false,       // no-wait
+			nil,         // arguments
+		)
+		if err != nil {
+			log.Error("failed to declare queue", zap.Error(err))
+			return pubsub.NewError(fmt.Sprintf("error declaring queue %s", event.Queue), err)
+		}
+
+		// Publish the message
+		err = ch.PublishWithContext(
+			publishCtx,
+			"",     // exchange
+			q.Name, // routing key
+			false,  // mandatory
+			false,  // immediate
+			amqp.Publishing{
+				ContentType: "application/json",
+				Body:        event.Data,
+			},
+		)
+		if err != nil {
+			log.Error("publish error", zap.Error(err))
+			return pubsub.NewError(fmt.Sprintf("error publishing to RabbitMQ queue %s", event.Queue), err)
+		}
 	}
 
 	return nil

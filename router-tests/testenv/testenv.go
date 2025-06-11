@@ -53,6 +53,7 @@ import (
 
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/datasource/pubsub_datasource"
 
+	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/wundergraph/cosmo/demo/pkg/subgraphs"
 	"github.com/wundergraph/cosmo/router/core"
 	nodev1 "github.com/wundergraph/cosmo/router/gen/proto/wg/cosmo/node/v1"
@@ -61,6 +62,7 @@ import (
 	"github.com/wundergraph/cosmo/router/pkg/logging"
 	rmetric "github.com/wundergraph/cosmo/router/pkg/metric"
 	pubsubNats "github.com/wundergraph/cosmo/router/pkg/pubsub/nats"
+	"github.com/wundergraph/cosmo/router/pkg/pubsub/rabbitmq"
 )
 
 var ErrEnvironmentClosed = errors.New("test environment closed")
@@ -69,6 +71,7 @@ const (
 	natsDefaultSourceName = "default"
 	myNatsProviderID      = "my-nats"
 	myKafkaProviderID     = "my-kafka"
+	myRabbitMQProviderID  = "my-rabbitmq"
 )
 
 var (
@@ -80,8 +83,11 @@ var (
 	ConfigWithEdfsKafkaJSONTemplate string
 	//go:embed testdata/configWithEdfsNats.json
 	ConfigWithEdfsNatsJSONTemplate string
-	demoNatsProviders              = []string{natsDefaultSourceName, myNatsProviderID}
-	demoKafkaProviders             = []string{myKafkaProviderID}
+	//go:embed testdata/configWithEdfsRabbitMQ.json
+	ConfigWithEdfsRabbitMQJSONTemplate string
+	demoNatsProviders                  = []string{natsDefaultSourceName, myNatsProviderID}
+	demoKafkaProviders                 = []string{myKafkaProviderID}
+	demoRabbitMQProviders              = []string{myRabbitMQProviderID}
 )
 
 func init() {
@@ -296,6 +302,7 @@ type Config struct {
 	EnableRuntimeMetrics               bool
 	EnableNats                         bool
 	EnableKafka                        bool
+	EnableRabbitMQ                     bool
 	SubgraphAccessLogsEnabled          bool
 	SubgraphAccessLogFields            []config.CustomAttribute
 	AssertCacheMetrics                 *CacheMetricsAssertions
@@ -357,6 +364,8 @@ func createTestEnv(t testing.TB, cfg *Config) (*Environment, error) {
 		natsStarted      sync.WaitGroup
 		natsSetup        *NatsData
 		kafkaSetup       *KafkaData
+		rabbitmqStarted  sync.WaitGroup
+		rabbitmqSetup    *RabbitMQData
 		pubSubPrefix     = strconv.FormatUint(rand.Uint64(), 16)
 	)
 
@@ -413,6 +422,20 @@ func createTestEnv(t testing.TB, cfg *Config) (*Environment, error) {
 		}()
 	}
 
+	if cfg.EnableRabbitMQ {
+		rabbitmqStarted.Add(1)
+		go func() {
+			defer rabbitmqStarted.Done()
+			log.Printf("[DEBUG] Starting RabbitMQ setup")
+			var rabbitmqErr error
+			rabbitmqSetup, rabbitmqErr = setupRabbitMQServer(t)
+			if rabbitmqErr != nil {
+				t.Fatalf("could not setup rabbitmq: %s", rabbitmqErr.Error())
+			}
+			log.Printf("[DEBUG] RabbitMQ setup completed with URL: %s", rabbitmqSetup.URL)
+		}()
+	}
+
 	if cfg.AssertCacheMetrics != nil {
 		if cfg.MetricReader == nil {
 			cfg.MetricReader = metric.NewManualReader()
@@ -459,11 +482,14 @@ func createTestEnv(t testing.TB, cfg *Config) (*Environment, error) {
 	ports := freeport.GetN(t, requiredPorts)
 
 	natsStarted.Wait()
+	if cfg.EnableRabbitMQ {
+		rabbitmqStarted.Wait()
+	}
 
 	getPubSubName := GetPubSubNameFn(pubSubPrefix)
 
 	employees := &Subgraph{
-		handler:          subgraphs.EmployeesHandler(subgraphOptions(ctx, t, cfg.Logger, natsSetup, getPubSubName)),
+		handler:          subgraphs.EmployeesHandler(subgraphOptions(ctx, t, cfg.Logger, natsSetup, rabbitmqSetup, getPubSubName)),
 		middleware:       cfg.Subgraphs.Employees.Middleware,
 		globalMiddleware: cfg.Subgraphs.GlobalMiddleware,
 		globalCounter:    counters.Global,
@@ -473,7 +499,7 @@ func createTestEnv(t testing.TB, cfg *Config) (*Environment, error) {
 	}
 
 	family := &Subgraph{
-		handler:          subgraphs.FamilyHandler(subgraphOptions(ctx, t, cfg.Logger, natsSetup, getPubSubName)),
+		handler:          subgraphs.FamilyHandler(subgraphOptions(ctx, t, cfg.Logger, natsSetup, rabbitmqSetup, getPubSubName)),
 		middleware:       cfg.Subgraphs.Family.Middleware,
 		globalMiddleware: cfg.Subgraphs.GlobalMiddleware,
 		globalCounter:    counters.Global,
@@ -483,7 +509,7 @@ func createTestEnv(t testing.TB, cfg *Config) (*Environment, error) {
 	}
 
 	hobbies := &Subgraph{
-		handler:          subgraphs.HobbiesHandler(subgraphOptions(ctx, t, cfg.Logger, natsSetup, getPubSubName)),
+		handler:          subgraphs.HobbiesHandler(subgraphOptions(ctx, t, cfg.Logger, natsSetup, rabbitmqSetup, getPubSubName)),
 		middleware:       cfg.Subgraphs.Hobbies.Middleware,
 		globalMiddleware: cfg.Subgraphs.GlobalMiddleware,
 		globalCounter:    counters.Global,
@@ -493,7 +519,7 @@ func createTestEnv(t testing.TB, cfg *Config) (*Environment, error) {
 	}
 
 	products := &Subgraph{
-		handler:          subgraphs.ProductsHandler(subgraphOptions(ctx, t, cfg.Logger, natsSetup, getPubSubName)),
+		handler:          subgraphs.ProductsHandler(subgraphOptions(ctx, t, cfg.Logger, natsSetup, rabbitmqSetup, getPubSubName)),
 		middleware:       cfg.Subgraphs.Products.Middleware,
 		globalMiddleware: cfg.Subgraphs.GlobalMiddleware,
 		globalCounter:    counters.Global,
@@ -503,7 +529,7 @@ func createTestEnv(t testing.TB, cfg *Config) (*Environment, error) {
 	}
 
 	productsFg := &Subgraph{
-		handler:          subgraphs.ProductsFGHandler(subgraphOptions(ctx, t, cfg.Logger, natsSetup, getPubSubName)),
+		handler:          subgraphs.ProductsFGHandler(subgraphOptions(ctx, t, cfg.Logger, natsSetup, rabbitmqSetup, getPubSubName)),
 		middleware:       cfg.Subgraphs.ProductsFg.Middleware,
 		globalMiddleware: cfg.Subgraphs.GlobalMiddleware,
 		globalCounter:    counters.Global,
@@ -513,7 +539,7 @@ func createTestEnv(t testing.TB, cfg *Config) (*Environment, error) {
 	}
 
 	test1 := &Subgraph{
-		handler:          subgraphs.Test1Handler(subgraphOptions(ctx, t, cfg.Logger, natsSetup, getPubSubName)),
+		handler:          subgraphs.Test1Handler(subgraphOptions(ctx, t, cfg.Logger, natsSetup, rabbitmqSetup, getPubSubName)),
 		middleware:       cfg.Subgraphs.Test1.Middleware,
 		globalMiddleware: cfg.Subgraphs.GlobalMiddleware,
 		globalCounter:    counters.Global,
@@ -523,7 +549,7 @@ func createTestEnv(t testing.TB, cfg *Config) (*Environment, error) {
 	}
 
 	availability := &Subgraph{
-		handler:          subgraphs.AvailabilityHandler(subgraphOptions(ctx, t, cfg.Logger, natsSetup, getPubSubName)),
+		handler:          subgraphs.AvailabilityHandler(subgraphOptions(ctx, t, cfg.Logger, natsSetup, rabbitmqSetup, getPubSubName)),
 		middleware:       cfg.Subgraphs.Availability.Middleware,
 		globalMiddleware: cfg.Subgraphs.GlobalMiddleware,
 		globalCounter:    counters.Global,
@@ -533,7 +559,7 @@ func createTestEnv(t testing.TB, cfg *Config) (*Environment, error) {
 	}
 
 	mood := &Subgraph{
-		handler:          subgraphs.MoodHandler(subgraphOptions(ctx, t, cfg.Logger, natsSetup, getPubSubName)),
+		handler:          subgraphs.MoodHandler(subgraphOptions(ctx, t, cfg.Logger, natsSetup, rabbitmqSetup, getPubSubName)),
 		middleware:       cfg.Subgraphs.Mood.Middleware,
 		globalMiddleware: cfg.Subgraphs.GlobalMiddleware,
 		globalCounter:    counters.Global,
@@ -543,7 +569,7 @@ func createTestEnv(t testing.TB, cfg *Config) (*Environment, error) {
 	}
 
 	countries := &Subgraph{
-		handler:          subgraphs.CountriesHandler(subgraphOptions(ctx, t, cfg.Logger, natsSetup, getPubSubName)),
+		handler:          subgraphs.CountriesHandler(subgraphOptions(ctx, t, cfg.Logger, natsSetup, rabbitmqSetup, getPubSubName)),
 		middleware:       cfg.Subgraphs.Countries.Middleware,
 		globalMiddleware: cfg.Subgraphs.GlobalMiddleware,
 		globalCounter:    counters.Global,
@@ -623,8 +649,9 @@ func createTestEnv(t testing.TB, cfg *Config) (*Environment, error) {
 
 	kafkaStarted.Wait()
 
-	rr, err := configureRouter(listenerAddr, cfg, &routerConfig, cdnServer, natsSetup)
+	rr, err := configureRouter(listenerAddr, cfg, &routerConfig, cdnServer, natsSetup, rabbitmqSetup)
 	if err != nil {
+		log.Printf("[ERROR] Failed to configure router: %s", err)
 		return nil, err
 	}
 
@@ -722,6 +749,7 @@ func createTestEnv(t testing.TB, cfg *Config) (*Environment, error) {
 		RouterClient:            client,
 		CDN:                     cdnServer,
 		NatsData:                natsSetup,
+		RabbitMQData:            rabbitmqSetup,
 		SubgraphRequestCount:    counters,
 		KafkaAdminClient:        kafkaAdminClient,
 		KafkaClient:             kafkaClient,
@@ -748,6 +776,13 @@ func createTestEnv(t testing.TB, cfg *Config) (*Environment, error) {
 		e.NatsConnectionMyNats = natsSetup.Connections[1]
 	}
 
+	if rabbitmqSetup != nil {
+		log.Printf("[DEBUG] Setting RabbitMQConnection in Environment")
+		e.RabbitMQConnection = rabbitmqSetup.Connection
+	} else {
+		log.Printf("[DEBUG] No rabbitmqSetup available, RabbitMQConnection will be nil")
+	}
+
 	if routerConfig.FeatureFlagConfigs != nil {
 		myFF, ok := routerConfig.FeatureFlagConfigs.ConfigByFeatureFlagName["myff"]
 		if ok {
@@ -756,6 +791,11 @@ func createTestEnv(t testing.TB, cfg *Config) (*Environment, error) {
 	}
 
 	waitErr := e.WaitForServer(ctx, e.RouterURL+"/health/ready", 100, 10)
+	if waitErr != nil {
+		log.Printf("[ERROR] Failed to wait for server: %s", waitErr)
+	} else {
+		log.Printf("[DEBUG] Server is ready at %s", e.RouterURL)
+	}
 
 	return e, waitErr
 }
@@ -772,7 +812,7 @@ func GenerateVersionedJwtToken() (string, error) {
 	return jwtToken.SignedString([]byte("hunter2"))
 }
 
-func configureRouter(listenerAddr string, testConfig *Config, routerConfig *nodev1.RouterConfig, cdn *httptest.Server, natsData *NatsData) (*core.Router, error) {
+func configureRouter(listenerAddr string, testConfig *Config, routerConfig *nodev1.RouterConfig, cdn *httptest.Server, natsData *NatsData, rabbitMQData *RabbitMQData) (*core.Router, error) {
 	cfg := config.Config{
 		Graph: config.Graph{},
 		CDN: config.CDNConfiguration{
@@ -842,6 +882,7 @@ func configureRouter(listenerAddr string, testConfig *Config, routerConfig *node
 
 	natsEventSources := make([]config.NatsEventSource, len(demoNatsProviders))
 	kafkaEventSources := make([]config.KafkaEventSource, len(demoKafkaProviders))
+	rabbitmqEventSources := make([]config.RabbitMQEventSource, len(demoRabbitMQProviders))
 
 	if natsData != nil {
 		for _, sourceName := range demoNatsProviders {
@@ -857,14 +898,29 @@ func configureRouter(listenerAddr string, testConfig *Config, routerConfig *node
 			Brokers: testConfig.KafkaSeeds,
 		})
 	}
+	if rabbitMQData != nil {
+		log.Printf("[DEBUG] Configuring RabbitMQ event sources with URL: %s", rabbitMQData.URL)
+		for _, sourceName := range demoRabbitMQProviders {
+			log.Printf("[DEBUG] Adding RabbitMQ event source: %s", sourceName)
+			rabbitmqEventSources = append(rabbitmqEventSources, config.RabbitMQEventSource{
+				ID:  sourceName,
+				URL: rabbitMQData.URL,
+			})
+		}
+	} else {
+		log.Printf("[DEBUG] No RabbitMQ data available, not configuring event sources")
+	}
 
 	eventsConfiguration := config.EventsConfiguration{
 		Providers: config.EventProviders{
-			Nats:  natsEventSources,
-			Kafka: kafkaEventSources,
+			Nats:     natsEventSources,
+			Kafka:    kafkaEventSources,
+			RabbitMQ: rabbitmqEventSources,
 		},
 	}
+
 	if testConfig.ModifyEventsConfiguration != nil {
+		log.Printf("[DEBUG] Calling ModifyEventsConfiguration")
 		testConfig.ModifyEventsConfiguration(&eventsConfiguration)
 	}
 
@@ -1126,6 +1182,8 @@ type Environment struct {
 	NatsData              *NatsData
 	NatsConnectionDefault *nats.Conn
 	NatsConnectionMyNats  *nats.Conn
+	RabbitMQData          *RabbitMQData
+	RabbitMQConnection    *amqp.Connection
 	SubgraphRequestCount  *SubgraphRequestCount
 	KafkaAdminClient      *kadm.Client
 	KafkaClient           *kgo.Client
@@ -1231,6 +1289,11 @@ func (e *Environment) Shutdown() {
 	// Flush Kafka connection
 	if e.cfg.EnableKafka && e.KafkaClient != nil {
 		e.KafkaClient.Flush(ctx)
+	}
+
+	// Close RabbitMQ connection if applicable
+	if e.cfg.EnableKafka && e.RabbitMQConnection != nil {
+		e.RabbitMQConnection.Close()
 	}
 
 	if e.routerCmd != nil {
@@ -2029,24 +2092,51 @@ func DeflakeWSWriteJSON(t testing.TB, conn *websocket.Conn, v interface{}) (err 
 	return err
 }
 
-func subgraphOptions(ctx context.Context, t testing.TB, logger *zap.Logger, natsData *NatsData, pubSubName func(string) string) *subgraphs.SubgraphOptions {
-	if natsData == nil {
-		return &subgraphs.SubgraphOptions{
-			NatsPubSubByProviderID: map[string]pubsub_datasource.NatsPubSub{},
-			GetPubSubName:          pubSubName,
+func subgraphOptions(ctx context.Context, t testing.TB, logger *zap.Logger, natsData *NatsData, rabbitmqData *RabbitMQData, pubSubName func(string) string) *subgraphs.SubgraphOptions {
+	if logger != nil {
+		logger.Debug("subgraphOptions called",
+			zap.Bool("natsData_nil", natsData == nil),
+			zap.Bool("rabbitmqData_nil", rabbitmqData == nil),
+		)
+	}
+
+	natsPubSubByProviderID := make(map[string]pubsub_datasource.NatsPubSub)
+	rabbitmqPubSubByProviderID := make(map[string]pubsub_datasource.RabbitMQPubSub)
+
+	if natsData != nil {
+		for _, sourceName := range demoNatsProviders {
+			if logger != nil {
+				logger.Debug("Setting up NATS connector", zap.String("sourceName", sourceName))
+			}
+			js, err := jetstream.New(natsData.Connections[0])
+			require.NoError(t, err)
+
+			natsPubSubByProviderID[sourceName] = pubsubNats.NewConnector(logger, natsData.Connections[0], js, "hostname", "listenaddr").New(ctx)
 		}
 	}
-	natsPubSubByProviderID := make(map[string]pubsub_datasource.NatsPubSub, len(demoNatsProviders))
-	for _, sourceName := range demoNatsProviders {
-		js, err := jetstream.New(natsData.Connections[0])
-		require.NoError(t, err)
 
-		natsPubSubByProviderID[sourceName] = pubsubNats.NewConnector(logger, natsData.Connections[0], js, "hostname", "listenaddr").New(ctx)
+	if rabbitmqData != nil {
+		for _, sourceName := range demoRabbitMQProviders {
+			if logger != nil {
+				logger.Debug("Setting up RabbitMQ connector", zap.String("sourceName", sourceName))
+			}
+
+			// Import the rabbitmq package and create a connector
+			rabbitmqConnector, err := rabbitmq.NewConnector(logger, rabbitmqData.URL)
+			if err != nil {
+				logger.Error("Failed to create RabbitMQ connector", zap.Error(err))
+				require.NoError(t, err)
+			}
+
+			// Create a new pub/sub instance and add it to the map
+			rabbitmqPubSubByProviderID[sourceName] = rabbitmqConnector.New(ctx)
+		}
 	}
 
 	return &subgraphs.SubgraphOptions{
-		NatsPubSubByProviderID: natsPubSubByProviderID,
-		GetPubSubName:          pubSubName,
+		NatsPubSubByProviderID:     natsPubSubByProviderID,
+		RabbitMQPubSubByProviderID: rabbitmqPubSubByProviderID,
+		GetPubSubName:              pubSubName,
 	}
 }
 

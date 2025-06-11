@@ -1579,6 +1579,254 @@ func TestWebSockets(t *testing.T) {
 			require.Equal(t, `{"data":{"initialPayload":{"123":456,"extensions":{"hello":"world2","initialPayload":{"123":456,"extensions":{"hello":"world"}}}}}}`, string(msg.Payload))
 		})
 	})
+	t.Run("single connection multiple differing subscriptions with rabbitmq", func(t *testing.T) {
+		t.Parallel()
+
+		testenv.Run(t, &testenv.Config{
+			RouterConfigJSONTemplate: testenv.ConfigWithEdfsRabbitMQJSONTemplate,
+			EnableRabbitMQ:           true,
+			ModifyEventsConfiguration: func(eventsConfig *config.EventsConfiguration) {
+				// Verify that the providers are set correctly
+				require.NotEmpty(t, eventsConfig.Providers.RabbitMQ, "RabbitMQ providers should not be empty")
+
+				// Set the ID to match what we expect in the customEvents field
+				for i := range eventsConfig.Providers.RabbitMQ {
+					eventsConfig.Providers.RabbitMQ[i].ID = "my-rabbitmq"
+				}
+			},
+		}, func(t *testing.T, xEnv *testenv.Environment) {
+			conn := xEnv.InitGraphQLWebSocketConnection(nil, nil, nil)
+
+			xEnv.WaitForConnectionCount(1, time.Second*5)
+
+			sub1 := testenv.WebSocketMessage{
+				ID:      "1",
+				Type:    "subscribe",
+				Payload: []byte(`{"query":"subscription { employeeUpdated(employeeID: 3) { id details { forename surname } } }"}`),
+			}
+			err := testenv.DeflakeWSWriteJSON(t, conn, &sub1)
+			require.NoError(t, err)
+
+			sub2 := testenv.WebSocketMessage{
+				ID:      "2",
+				Type:    "subscribe",
+				Payload: []byte(`{"query":"subscription { currentTime { unixTime timeStamp }}"}`),
+			}
+			err = testenv.DeflakeWSWriteJSON(t, conn, &sub2)
+			require.NoError(t, err)
+
+			xEnv.WaitForSubscriptionCount(2, time.Second*5)
+
+			wg := sync.WaitGroup{}
+			wg.Add(1)
+
+			count := 0
+			sub1Count := 0
+			sub2Count := 0
+
+			go func() {
+				defer conn.Close()
+
+				var msg testenv.WebSocketMessage
+				for {
+					err := testenv.DeflakeWSReadJSON(t, conn, &msg)
+					if err != nil {
+						return
+					}
+					if msg.Type == "next" {
+						count++
+						switch msg.ID {
+						case "1":
+							stefan, err := jsonparser.GetString(msg.Payload, "data", "employeeUpdated", "details", "forename")
+							require.NoError(t, err)
+							require.Equal(t, "Jens", stefan)
+							sub1Count++
+							if sub1Count == 2 {
+								stop := testenv.WebSocketMessage{
+									ID:   "1",
+									Type: "complete",
+								}
+								err = testenv.DeflakeWSWriteJSON(t, conn, &stop)
+								require.NoError(t, err)
+								var complete testenv.WebSocketMessage
+								err = testenv.DeflakeWSReadJSON(t, conn, &complete)
+								require.NoError(t, err)
+								require.Equal(t, "1", complete.ID)
+								require.Equal(t, "complete", complete.Type)
+							}
+						case "2":
+							timeStamp, err := jsonparser.GetString(msg.Payload, "data", "currentTime", "timeStamp")
+							require.NoError(t, err)
+							require.NotEqual(t, "", timeStamp)
+							sub2Count++
+							if sub2Count == 2 {
+								stop := testenv.WebSocketMessage{
+									ID:   "2",
+									Type: "complete",
+								}
+								err = testenv.DeflakeWSWriteJSON(t, conn, &stop)
+								require.NoError(t, err)
+								var complete testenv.WebSocketMessage
+								err = testenv.DeflakeWSReadJSON(t, conn, &complete)
+								require.NoError(t, err)
+								require.Equal(t, "2", complete.ID)
+								require.Equal(t, "complete", complete.Type)
+							}
+						}
+					}
+					if count == 4 {
+						terminate := testenv.WebSocketMessage{
+							Type: "connection_terminate",
+						}
+						err = testenv.DeflakeWSWriteJSON(t, conn, &terminate)
+						require.NoError(t, err)
+						_, _, err = conn.NextReader()
+						require.Error(t, err)
+						wg.Done()
+						return
+					}
+				}
+			}()
+
+			go func() {
+				time.Sleep(time.Millisecond * 100)
+				produceRabbitMQMessage(t, xEnv, "employeeUpdated", `{"id":3,"__typename": "Employee","details":{"forename":"Jens","surname":"Neuse"}}`)
+				time.Sleep(time.Millisecond * 100)
+				produceRabbitMQMessage(t, xEnv, "employeeUpdated", `{"id":3,"__typename": "Employee","details":{"forename":"Jens","surname":"Neuse"}}`)
+			}()
+
+			wg.Wait()
+			xEnv.WaitForSubscriptionCount(0, time.Second*5)
+			xEnv.WaitForConnectionCount(0, time.Second*5)
+		})
+	})
+
+	t.Run("single connection multiple differing subscriptions with kafka", func(t *testing.T) {
+		t.Parallel()
+
+		topics := []string{"employeeUpdated", "employeeUpdatedTwo"}
+
+		testenv.Run(t, &testenv.Config{
+			RouterConfigJSONTemplate: testenv.ConfigWithEdfsKafkaJSONTemplate,
+			EnableKafka:              true,
+			ModifyEventsConfiguration: func(eventsConfig *config.EventsConfiguration) {
+				// Verify that the providers are set correctly
+				require.NotEmpty(t, eventsConfig.Providers.Kafka, "Kafka providers should not be empty")
+
+				// Set the ID to match what we expect in the customEvents field
+				for i := range eventsConfig.Providers.Kafka {
+					eventsConfig.Providers.Kafka[i].ID = "my-kafka"
+				}
+			},
+		}, func(t *testing.T, xEnv *testenv.Environment) {
+			// Ensure topics exist
+			ensureTopicExists(t, xEnv, topics...)
+
+			conn := xEnv.InitGraphQLWebSocketConnection(nil, nil, nil)
+
+			xEnv.WaitForConnectionCount(1, time.Second*5)
+
+			sub1 := testenv.WebSocketMessage{
+				ID:      "1",
+				Type:    "subscribe",
+				Payload: []byte(`{"query":"subscription { employeeUpdatedMyKafka(employeeID: 3) { id details { forename surname } } }"}`),
+			}
+			err := testenv.DeflakeWSWriteJSON(t, conn, &sub1)
+			require.NoError(t, err)
+
+			sub2 := testenv.WebSocketMessage{
+				ID:      "2",
+				Type:    "subscribe",
+				Payload: []byte(`{"query":"subscription { currentTime { unixTime timeStamp }}"}`),
+			}
+			err = testenv.DeflakeWSWriteJSON(t, conn, &sub2)
+			require.NoError(t, err)
+
+			xEnv.WaitForSubscriptionCount(2, time.Second*5)
+
+			wg := sync.WaitGroup{}
+			wg.Add(1)
+
+			count := 0
+			sub1Count := 0
+			sub2Count := 0
+
+			go func() {
+				defer conn.Close()
+
+				var msg testenv.WebSocketMessage
+				for {
+					err := testenv.DeflakeWSReadJSON(t, conn, &msg)
+					if err != nil {
+						return
+					}
+					if msg.Type == "next" {
+						count++
+						switch msg.ID {
+						case "1":
+							forename, err := jsonparser.GetString(msg.Payload, "data", "employeeUpdatedMyKafka", "details", "forename")
+							require.NoError(t, err)
+							require.Equal(t, "Jens", forename)
+							sub1Count++
+							if sub1Count == 2 {
+								stop := testenv.WebSocketMessage{
+									ID:   "1",
+									Type: "complete",
+								}
+								err = testenv.DeflakeWSWriteJSON(t, conn, &stop)
+								require.NoError(t, err)
+								var complete testenv.WebSocketMessage
+								err = testenv.DeflakeWSReadJSON(t, conn, &complete)
+								require.NoError(t, err)
+								require.Equal(t, "1", complete.ID)
+								require.Equal(t, "complete", complete.Type)
+							}
+						case "2":
+							timeStamp, err := jsonparser.GetString(msg.Payload, "data", "currentTime", "timeStamp")
+							require.NoError(t, err)
+							require.NotEqual(t, "", timeStamp)
+							sub2Count++
+							if sub2Count == 2 {
+								stop := testenv.WebSocketMessage{
+									ID:   "2",
+									Type: "complete",
+								}
+								err = testenv.DeflakeWSWriteJSON(t, conn, &stop)
+								require.NoError(t, err)
+								var complete testenv.WebSocketMessage
+								err = testenv.DeflakeWSReadJSON(t, conn, &complete)
+								require.NoError(t, err)
+								require.Equal(t, "2", complete.ID)
+								require.Equal(t, "complete", complete.Type)
+							}
+						}
+					}
+					if count == 4 {
+						terminate := testenv.WebSocketMessage{
+							Type: "connection_terminate",
+						}
+						err = testenv.DeflakeWSWriteJSON(t, conn, &terminate)
+						require.NoError(t, err)
+						_, _, err = conn.NextReader()
+						require.Error(t, err)
+						wg.Done()
+						return
+					}
+				}
+			}()
+
+			go func() {
+				time.Sleep(time.Millisecond * 100)
+				produceKafkaMessage(t, xEnv, topics[0], `{"__typename":"Employee","id": 1,"details":{"forename":"Jens","surname":"Neuse"}}`)
+				time.Sleep(time.Millisecond * 100)
+				produceKafkaMessage(t, xEnv, topics[0], `{"__typename":"Employee","id": 1,"details":{"forename":"Jens","surname":"Neuse"}}`)
+			}()
+
+			wg.Wait()
+			xEnv.WaitForSubscriptionCount(0, time.Second*5)
+			xEnv.WaitForConnectionCount(0, time.Second*5)
+		})
+	})
 	t.Run("single connection multiple differing subscriptions", func(t *testing.T) {
 		t.Parallel()
 

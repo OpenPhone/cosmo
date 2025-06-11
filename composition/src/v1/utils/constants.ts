@@ -904,6 +904,48 @@ export const EDFS_NATS_STREAM_CONFIGURATION_DEFINITION: MutableInputObjectNode =
 };
 
 /*
+ * input edfs__RabbitMQStreamConfiguration {
+ *   consumerInactiveThreshold : Int! = 30
+ *   consumerName: String!
+ *   streamName: String!
+ * }
+ * */
+export const EDFS_RABBITMQ_STREAM_CONFIGURATION_DEFINITION: MutableInputObjectNode = {
+  kind: Kind.INPUT_OBJECT_TYPE_DEFINITION,
+  name: stringToNameNode(EDFS_RABBITMQ_STREAM_CONFIGURATION),
+  fields: [
+    {
+      kind: Kind.INPUT_VALUE_DEFINITION,
+      name: stringToNameNode(CONSUMER_NAME),
+      type: {
+        kind: Kind.NON_NULL_TYPE,
+        type: stringToNamedTypeNode(STRING_SCALAR),
+      },
+    },
+    {
+      kind: Kind.INPUT_VALUE_DEFINITION,
+      name: stringToNameNode(STREAM_NAME),
+      type: {
+        kind: Kind.NON_NULL_TYPE,
+        type: stringToNamedTypeNode(STRING_SCALAR),
+      },
+    },
+    {
+      kind: Kind.INPUT_VALUE_DEFINITION,
+      name: stringToNameNode(CONSUMER_INACTIVE_THRESHOLD),
+      type: {
+        kind: Kind.NON_NULL_TYPE,
+        type: stringToNamedTypeNode(INT_SCALAR),
+      },
+      defaultValue: {
+        kind: Kind.INT,
+        value: DEFAULT_CONSUMER_INACTIVE_THRESHOLD.toString(),
+      },
+    },
+  ],
+};
+
+/*
  * directive @openfed__configureDescription(
  *   propagate: Boolean! = true
  *   descriptionOverride: String

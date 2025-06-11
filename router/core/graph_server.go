@@ -5,6 +5,12 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/cloudflare/backoff"
 	"github.com/dgraph-io/ristretto/v2"
 	"github.com/go-chi/chi/v5"
@@ -24,11 +30,6 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/exp/maps"
-	"net/http"
-	"net/url"
-	"strings"
-	"sync"
-	"time"
 
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/datasource/pubsub_datasource"
 
@@ -1261,7 +1262,7 @@ func (s *graphServer) buildPubSubConfiguration(ctx context.Context, engineConfig
 			}
 		}
 
-		for _, eventConfiguration := range datasourceConfiguration.GetCustomEvents().GetRabbitMQ() {
+		for _, eventConfiguration := range datasourceConfiguration.GetCustomEvents().GetRabbitmq() {
 
 			providerID := eventConfiguration.EngineEventConfiguration.GetProviderId()
 			// if this source name's provider has already been initiated, do not try to initiate again

@@ -445,7 +445,7 @@ func (l *Loader) Load(engineConfig *nodev1.EngineConfiguration, subgraphs []*nod
 				})
 			}
 
-			for _, eventConfiguration := range in.GetCustomEvents().GetRabbitMQ() {
+			for _, eventConfiguration := range in.GetCustomEvents().GetRabbitmq() {
 				eventType, err := pubsub_datasource.EventTypeFromString(eventConfiguration.EngineEventConfiguration.Type.String())
 				if err != nil {
 					return nil, fmt.Errorf("invalid event type %q for data source %q: %w", eventConfiguration.EngineEventConfiguration.Type.String(), in.Id, err)

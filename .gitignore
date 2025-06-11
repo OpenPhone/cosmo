@@ -29,3 +29,10 @@ go.work.sum
 # Submodule development
 .gitmodules
 graphql-go-tools/
+# Private individual user cursor rules
+.cursor
+docs/workflow-rules.md
+.cursorignore
+.cursorindexingignore
+xnotes/custom-agents.md
+xnotes/project-idea-prompt.md

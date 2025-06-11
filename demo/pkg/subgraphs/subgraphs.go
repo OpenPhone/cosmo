@@ -162,8 +162,9 @@ func subgraphHandler(schema graphql.ExecutableSchema) http.Handler {
 }
 
 type SubgraphOptions struct {
-	NatsPubSubByProviderID map[string]pubsub_datasource.NatsPubSub
-	GetPubSubName          func(string) string
+	NatsPubSubByProviderID     map[string]pubsub_datasource.NatsPubSub
+	RabbitMQPubSubByProviderID map[string]pubsub_datasource.RabbitMQPubSub
+	GetPubSubName              func(string) string
 }
 
 func EmployeesHandler(opts *SubgraphOptions) http.Handler {

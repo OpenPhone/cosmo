@@ -33,6 +33,8 @@ export type RabbitMQEventConfiguration = {
   providerType: 'rabbitmq';
   queues: string[];
   type: RabbitMQEventType;
+  exchange?: string;
+  routingKey?: string;
 };
 
 export type EventConfiguration = KafkaEventConfiguration | NatsEventConfiguration | RabbitMQEventConfiguration;
