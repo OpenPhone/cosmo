@@ -73,7 +73,7 @@
     "ioredis": "^5.4.1",
     "jose": "^5.2.4",
     "lodash": "^4.17.21",
-    "nodemailer": "^6.9.11",
+    "nodemailer": "^8.0.5",
     "nuid": "^1.1.6",
     "octokit": "^4.1.3",
     "openai": "^4.54.0",
