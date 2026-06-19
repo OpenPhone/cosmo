@@ -84,7 +84,7 @@
     "isomorphic-dompurify": "^2.33.0",
     "jose": "^5.2.4",
     "lodash-es": "catalog:",
-    "nodemailer": "^7.0.11",
+    "nodemailer": "^9.0.1",
     "nuid": "^1.1.6",
     "octokit": "^4.1.3",
     "openai": "^4.104.0",
