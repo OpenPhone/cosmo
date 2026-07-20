@@ -43,8 +43,8 @@ catalogs:
       specifier: 3.2.4
       version: 3.2.4
     axios:
-      specifier: 1.17.0
-      version: 1.17.0
+      specifier: 1.18.0
+      version: 1.18.0
     date-fns:
       specifier: ^3.6.0
       version: 3.6.0
@@ -319,7 +319,7 @@ importers:
         version: 8.18.0
       axios:
         specifier: 'catalog:'
-        version: 1.17.0
+        version: 1.18.0
       boxen:
         specifier: 7.1.1
         version: 7.1.1
@@ -610,10 +610,10 @@ importers:
         version: link:../protographic
       axios:
         specifier: 'catalog:'
-        version: 1.17.0
+        version: 1.18.0
       axios-retry:
         specifier: ^4.5.0
-        version: 4.5.0(axios@1.17.0)
+        version: 4.5.0(axios@1.18.0)
       bullmq:
         specifier: ^5.10.0
         version: 5.10.0
@@ -858,7 +858,7 @@ importers:
         version: 1.1.2(@types/react-dom@18.3.0)(@types/react@18.3.3)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       axios:
         specifier: 'catalog:'
-        version: 1.17.0
+        version: 1.18.0
       change-case:
         specifier: ^5.2.0
         version: 5.4.4
@@ -1207,7 +1207,7 @@ importers:
         version: link:../connect
       axios:
         specifier: 'catalog:'
-        version: 1.17.0
+        version: 1.18.0
       bowser:
         specifier: ^2.11.0
         version: 2.11.0
@@ -2727,11 +2727,11 @@ packages:
 
   '@esbuild-kit/core-utils@3.1.0':
     resolution: {integrity: sha512-Uuk8RpCg/7fdHSceR1M6XbSZFSuMrxcePFuGgyvsBn+u339dk5OeL4jv2EojwTN2st/unJGsVm4qHWjWNmJ/tw==}
-    deprecated: 'Merged into tsx: https://tsx.is'
+    deprecated: 'Merged into tsx: https://tsx.hirok.io'
 
   '@esbuild-kit/esm-loader@2.5.5':
     resolution: {integrity: sha512-Qwfvj/qoPbClxCRNuac1Du01r9gvNOT+pMYtJDapfB1eoGN1YlJ1BixLyL9WVENRx5RXgNLdfYdx/CuswlGhMw==}
-    deprecated: 'Merged into tsx: https://tsx.is'
+    deprecated: 'Merged into tsx: https://tsx.hirok.io'
 
   '@esbuild/aix-ppc64@0.19.11':
     resolution: {integrity: sha512-FnzU0LyE3ySQk7UntJO4+qIiQgI7KoODnZg5xzXIrFJlKd2P2gwHsHY4927xj9y5PJmJSzULiUCWmv7iWnNa7g==}
@@ -8209,8 +8209,8 @@ packages:
     peerDependencies:
       axios: 0.x || 1.x
 
-  axios@1.17.0:
-    resolution: {integrity: sha512-J8SwNxprqqpbfenehxWYXE7CW+wM1BB4w3+N+g+/Wx40xM4rsLrfPmHHxSWIxJLYDgSY/HqlFPIYb2/S3rxafw==}
+  axios@1.18.0:
+    resolution: {integrity: sha512-E32NzpYKp++W7XRe52rHiXV2ehxmh3wbdgO7MHeFM+vqxLBYHzt0ElkiImtOBxtOmyp0yoC8C6uESVV84Y2/hw==}
 
   axobject-query@3.2.1:
     resolution: {integrity: sha512-jsyHu61e6N4Vbz/v18DHwWYKK0bSWLqn47eeDSKPB7m8tqMHF9YJ+mhIk2lVteyZrY8tnSj/jHOv4YiTCuCJgg==}
@@ -10177,7 +10177,7 @@ packages:
   git-raw-commits@4.0.0:
     resolution: {integrity: sha512-ICsMM1Wk8xSGMowkOmPrzo2Fgmfo4bMHLNX6ytHjajRJUqvHOw/TFapQ+QG75c3X/tTDDhOSRPGC52dDbNM8FQ==}
     engines: {node: '>=16'}
-    deprecated: This package is no longer maintained. For the JavaScript API, please use @conventional-changelog/git-client instead.
+    deprecated: Deprecated and no longer maintained. Use @conventional-changelog/git-client instead.
     hasBin: true
 
   git-up@8.1.1:
@@ -11919,6 +11919,7 @@ packages:
   nuid@1.1.6:
     resolution: {integrity: sha512-Eb3CPCupYscP1/S1FQcO5nxtu6l/F3k0MQ69h7f5osnsemVk5pkc8/5AyalVT+NCfra9M71U8POqF6EZa6IHvg==}
     engines: {node: '>= 8.16.0'}
+    deprecated: 'Package deprecated. Use @nats-io/nuid instead: https://www.npmjs.com/package/@nats-io/nuid'
 
   nullthrows@1.1.1:
     resolution: {integrity: sha512-2vPPEi+Z7WqML2jZYddDIfy5Dqb0r2fze2zTxNNknZaFpVHU3mFB3R+DWeJWGVx0ecvttSGlJTI+WG+8Z4cDWw==}
@@ -12980,6 +12981,7 @@ packages:
   recharts@2.10.3:
     resolution: {integrity: sha512-G4J96fKTZdfFQd6aQnZjo2nVNdXhp+uuLb00+cBTGLo85pChvm1+E67K3wBOHDE/77spcYb2Cy9gYWVqiZvQCg==}
     engines: {node: '>=14'}
+    deprecated: 1.x and 2.x branches are no longer active. Bump to Recharts v3 to receive latest features and bugfixes. See https://github.com/recharts/recharts/wiki/3.0-migration-guide
     peerDependencies:
       prop-types: ^15.6.0
       react: 18.3.1
@@ -22994,12 +22996,12 @@ snapshots:
 
   axe-core@4.7.2: {}
 
-  axios-retry@4.5.0(axios@1.17.0):
+  axios-retry@4.5.0(axios@1.18.0):
     dependencies:
-      axios: 1.17.0
+      axios: 1.18.0
       is-retry-allowed: 2.2.0
 
-  axios@1.17.0:
+  axios@1.18.0:
     dependencies:
       follow-redirects: 1.16.0
       form-data: 4.0.5
@@ -28043,7 +28045,7 @@ snapshots:
 
   posthog-node@4.18.0:
     dependencies:
-      axios: 1.17.0
+      axios: 1.18.0
     transitivePeerDependencies:
       - debug
       - supports-color
