@@ -143,10 +143,7 @@ func (p *ProviderAdapter) Subscribe(ctx context.Context, conf datasource.Subscri
 
 	sub := p.conn.Subscribe(ctx, channels...)
 	if len(patterns) > 0 {
-		if err := sub.PSubscribe(ctx, patterns...); err != nil {
-			_ = sub.Close()
-			return datasource.NewError("failed to subscribe to redis channel patterns", err)
-		}
+		_ = sub.PSubscribe(ctx, patterns...)
 	}
 	msgChan := sub.Channel()
 
