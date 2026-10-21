@@ -45,7 +45,7 @@
     "@connectrpc/connect": "catalog:",
     "@connectrpc/connect-node": "catalog:",
     "@graphql-tools/utils": "catalog:",
-    "@modelcontextprotocol/sdk": "1.26.0",
+    "@modelcontextprotocol/sdk": "1.32.0",
     "@octokit/rest": "22.0.0",
     "@wundergraph/composition": "workspace:*",
     "@wundergraph/cosmo-connect": "workspace:*",
