@@ -846,7 +846,8 @@
           "URLs": [
             "redis://localhost:6379/11"
           ],
-          "ClusterEnabled": true
+          "ClusterEnabled": true,
+          "SubscriptionConnections": 100
         }
       ]
     },
