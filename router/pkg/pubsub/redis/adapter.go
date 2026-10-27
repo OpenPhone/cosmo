@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/wundergraph/cosmo/router/pkg/metric"
@@ -23,7 +23,7 @@ const (
 // Ensure ProviderAdapter implements ProviderSubscriptionHooks
 var _ datasource.Adapter = (*ProviderAdapter)(nil)
 
-func NewProviderAdapter(ctx context.Context, logger *zap.Logger, urls []string, clusterEnabled bool, opts datasource.ProviderOpts) datasource.Adapter {
+func NewProviderAdapter(ctx context.Context, logger *zap.Logger, urls []string, clusterEnabled bool, subscriptionConnections int, opts datasource.ProviderOpts) datasource.Adapter {
 	ctx, cancel := context.WithCancel(ctx)
 	if logger == nil {
 		logger = zap.NewNop()
@@ -44,6 +44,8 @@ func NewProviderAdapter(ctx context.Context, logger *zap.Logger, urls []string, 
 		clusterEnabled:    clusterEnabled,
 		streamMetricStore: store,
 		skipUnavailable:   opts.SkipUnavailableProviders,
+
+		subscriptionConnections: subscriptionConnections,
 	}
 }
 
@@ -60,6 +62,12 @@ type ProviderAdapter struct {
 	// the resilient client even if the initial connection check fails, so go-redis can
 	// reconnect on a later command and the provider recovers without a restart.
 	skipUnavailable bool
+
+	// subscriptionConnections > 0 shares that many PubSub connections between all
+	// subscriptions. 0 opens one connection per subscription.
+	subscriptionConnections int
+	shards                  []*shard
+	queuedBytes             atomic.Int64
 }
 
 func (p *ProviderAdapter) Startup(ctx context.Context) error {
@@ -81,6 +89,7 @@ func (p *ProviderAdapter) Startup(ctx context.Context) error {
 			// recovers without a restart once the broker is reachable. The error is still
 			// returned so the caller can log a distinct "could not connect" message.
 			p.conn = rdCloser
+			p.startShards()
 			return err
 		}
 		// Strict mode: the router will abort startup, so close the client we won't keep.
@@ -91,6 +100,7 @@ func (p *ProviderAdapter) Startup(ctx context.Context) error {
 	}
 
 	p.conn = rdCloser
+	p.startShards()
 
 	return nil
 }
@@ -102,6 +112,11 @@ func (p *ProviderAdapter) Shutdown(ctx context.Context) error {
 
 	// Cancel the context to stop the subscriptions
 	p.cancel()
+
+	// Closing a shard closes its message channel, which stops its dispatcher.
+	for _, sh := range p.shards {
+		_ = sh.pubsub.Close()
+	}
 
 	// Wait for the subscriptions to be closed
 	p.closeWg.Wait()
@@ -129,12 +144,17 @@ func (p *ProviderAdapter) Subscribe(ctx context.Context, conf datasource.Subscri
 		return datasource.NewError("redis connection not initialized", nil)
 	}
 
+	if len(p.shards) > 0 {
+		p.subscribeShared(ctx, conf.ProviderID(), subConf.Channels, updater, log)
+		return nil
+	}
+
 	// Redis matches every PUBLISH against every registered pattern, so pattern
 	// subscriptions on literal channel names make each publish O(patterns). Only
 	// channels with glob syntax need PSUBSCRIBE.
 	var channels, patterns []string
 	for _, channel := range subConf.Channels {
-		if strings.ContainsAny(channel, `*?[\`) {
+		if isPattern(channel) {
 			patterns = append(patterns, channel)
 		} else {
 			channels = append(channels, channel)

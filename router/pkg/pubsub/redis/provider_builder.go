@@ -70,7 +70,7 @@ func (b *ProviderBuilder) BuildEngineDataSourceFactory(data *nodev1.RedisEventCo
 
 // Providers returns the Redis PubSub providers for the given provider IDs
 func (b *ProviderBuilder) BuildProvider(provider config.RedisEventSource, providerOpts datasource.ProviderOpts) (datasource.Provider, error) {
-	adapter := NewProviderAdapter(b.ctx, b.logger, provider.URLs, provider.ClusterEnabled, providerOpts)
+	adapter := NewProviderAdapter(b.ctx, b.logger, provider.URLs, provider.ClusterEnabled, provider.SubscriptionConnections, providerOpts)
 	eventBuilder := func(data []byte) datasource.MutableStreamEvent {
 		return &MutableEvent{Data: data}
 	}

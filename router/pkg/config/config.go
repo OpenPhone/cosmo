@@ -886,6 +886,8 @@ type RedisEventSource struct {
 	ID             string   `yaml:"id,omitempty"`
 	URLs           []string `yaml:"urls,omitempty"`
 	ClusterEnabled bool     `yaml:"cluster_enabled"`
+	// SubscriptionConnections > 0 shares that many connections between all subscriptions.
+	SubscriptionConnections int `yaml:"subscription_connections"`
 }
 
 func (r RedisEventSource) GetID() string {

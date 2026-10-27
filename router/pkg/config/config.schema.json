@@ -3403,6 +3403,12 @@
                     "type": "boolean",
                     "description": "If enabled, the Redis cluster client is used to connect to the server.",
                     "default": false
+                  },
+                  "subscription_connections": {
+                    "type": "integer",
+                    "description": "The number of Redis connections that all subscriptions of this provider share. A channel always uses the same connection. 0 opens one connection for each subscription.",
+                    "minimum": 0,
+                    "default": 0
                   }
                 }
               }

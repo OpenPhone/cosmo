@@ -27,7 +27,7 @@ func TestProviderAdapter_SubscribeWithoutStartupReturnsError(t *testing.T) {
 	ctx := context.Background()
 	// The adapter is created but Startup is never called, so p.conn stays nil. This
 	// mirrors the state of a provider that failed to connect under skip_unavailable_providers.
-	adapter := NewProviderAdapter(ctx, zaptest.NewLogger(t), []string{"redis://localhost:6379"}, false, datasource.ProviderOpts{})
+	adapter := NewProviderAdapter(ctx, zaptest.NewLogger(t), []string{"redis://localhost:6379"}, false, 0, datasource.ProviderOpts{})
 
 	conf := &SubscriptionEventConfiguration{
 		Provider:  "test-provider",
@@ -47,7 +47,7 @@ func TestProviderAdapter_ConnectionCleanupOnUnsubscribe(t *testing.T) {
 	redis := miniredis.RunT(t)
 
 	ctx := context.Background()
-	adapter := NewProviderAdapter(ctx, zaptest.NewLogger(t), []string{fmt.Sprintf("redis://%s", redis.Addr())}, false, datasource.ProviderOpts{})
+	adapter := NewProviderAdapter(ctx, zaptest.NewLogger(t), []string{fmt.Sprintf("redis://%s", redis.Addr())}, false, 0, datasource.ProviderOpts{})
 
 	require.NoError(t, adapter.Startup(ctx))
 	t.Cleanup(func() {
@@ -107,7 +107,7 @@ func TestProviderAdapter_SubscribeUsesChannelsForLiteralNamesAndPatternsForGlobs
 	redis := miniredis.RunT(t)
 
 	ctx := context.Background()
-	adapter := NewProviderAdapter(ctx, zaptest.NewLogger(t), []string{fmt.Sprintf("redis://%s", redis.Addr())}, false, datasource.ProviderOpts{})
+	adapter := NewProviderAdapter(ctx, zaptest.NewLogger(t), []string{fmt.Sprintf("redis://%s", redis.Addr())}, false, 0, datasource.ProviderOpts{})
 	require.NoError(t, adapter.Startup(ctx))
 	t.Cleanup(func() {
 		_ = adapter.Shutdown(ctx)
@@ -139,7 +139,7 @@ func newStartedAdapter(t *testing.T, redis *miniredis.Miniredis) datasource.Adap
 	t.Helper()
 
 	ctx := context.Background()
-	adapter := NewProviderAdapter(ctx, zaptest.NewLogger(t), []string{fmt.Sprintf("redis://%s", redis.Addr())}, false, datasource.ProviderOpts{})
+	adapter := NewProviderAdapter(ctx, zaptest.NewLogger(t), []string{fmt.Sprintf("redis://%s", redis.Addr())}, false, 0, datasource.ProviderOpts{})
 	require.NoError(t, adapter.Startup(ctx))
 	t.Cleanup(func() {
 		_ = adapter.Shutdown(ctx)
