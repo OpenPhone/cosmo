@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	rd "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 	"github.com/wundergraph/cosmo/router/pkg/metric"
 	"github.com/wundergraph/cosmo/router/pkg/pubsub/datasource"
@@ -349,5 +350,126 @@ func TestSharedConnections_ShutdownStopsAllGoroutines(t *testing.T) {
 		require.NoError(t, err)
 	case <-time.After(5 * time.Second):
 		t.Fatal("Shutdown did not return")
+	}
+}
+
+type steppedUpdater struct {
+	entered chan struct{}
+	permit  chan struct{}
+}
+
+func (u *steppedUpdater) Update([]datasource.StreamEvent) {
+	u.entered <- struct{}{}
+	<-u.permit
+}
+func (u *steppedUpdater) Complete()                 {}
+func (u *steppedUpdater) Done()                     {}
+func (u *steppedUpdater) SetHooks(datasource.Hooks) {}
+
+func waitForUpdater(t *testing.T, ch <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(3 * time.Second):
+		t.Fatal("updater not reached")
+	}
+}
+
+func newSteppedUpdater(t *testing.T) *steppedUpdater {
+	u := &steppedUpdater{entered: make(chan struct{}, 100), permit: make(chan struct{})}
+	t.Cleanup(func() { close(u.permit) })
+	return u
+}
+
+func TestSharedConnections_ShutdownDiscardsPendingBatch(t *testing.T) {
+	r := miniredis.RunT(t)
+	p := newSharedAdapter(t, r, 1, nil)
+	u := newSteppedUpdater(t)
+	subscribe(t, context.Background(), p, u, "review")
+	require.Eventually(t, func() bool { return len(r.PubSubChannels("")) == 1 }, time.Second, time.Millisecond)
+	r.Publish("review", "first")
+	waitForUpdater(t, u.entered)
+	r.Publish("review", "second")
+	r.Publish("review", "third")
+	require.Eventually(t, func() bool {
+		sh := p.shardFor("review")
+		sh.mu.Lock()
+		defer sh.mu.Unlock()
+		for s := range sh.subs["review"] {
+			s.mu.Lock()
+			n := len(s.queue)
+			s.mu.Unlock()
+			return n == 2
+		}
+		return false
+	}, time.Second, time.Millisecond)
+	u.permit <- struct{}{}
+	waitForUpdater(t, u.entered)
+	done := make(chan struct{})
+	go func() {
+		_ = p.Shutdown(context.Background())
+		close(done)
+	}()
+	waitForUpdater(t, p.ctx.Done())
+	u.permit <- struct{}{}
+	select {
+	case <-u.entered:
+		t.Fatal("Shutdown cancelled provider, but updater received third event from pending batch")
+	case <-done:
+		require.Zero(t, p.queuedBytes.Load())
+	case <-time.After(time.Second):
+		t.Fatal("shutdown stuck")
+	}
+}
+
+func TestSharedConnections_InFlightBatchesCountTowardLimits(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		subscribers int
+		batches     int
+	}{
+		{name: "subscriber", subscribers: 1, batches: 2},
+		{name: "provider", subscribers: 12, batches: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &ProviderAdapter{}
+			log := zaptest.NewLogger(t)
+			var subscribers []*subscriber
+			var retained [][]*rd.Message
+			var acceptedBytes int64
+			var rejected int
+			for range tc.subscribers {
+				s := &subscriber{notify: make(chan struct{}, 1)}
+				subscribers = append(subscribers, s)
+				for range tc.batches {
+					for range 7 {
+						msg := &rd.Message{Channel: "orders", Payload: strings.Repeat("x", 1024*1024)}
+						if p.enqueue(s, msg) {
+							acceptedBytes += int64(len(msg.Payload)+len(msg.Channel)+len(msg.Pattern)) + messageOverhead
+						} else {
+							rejected++
+						}
+					}
+					batch, _ := p.take(s)
+					retained = append(retained, batch)
+				}
+			}
+			require.Positive(t, rejected, "undelivered batches must prevent accepting messages over the cap")
+			require.Equal(t, acceptedBytes, p.queuedBytes.Load())
+			require.LessOrEqual(t, acceptedBytes, int64(providerQueueMaxBytes))
+			var retainedBytes int64
+			for _, batch := range retained {
+				for _, msg := range batch {
+					retainedBytes += int64(len(msg.Payload)+len(msg.Channel)+len(msg.Pattern)) + messageOverhead
+				}
+			}
+			require.Equal(t, acceptedBytes, retainedBytes)
+			for _, s := range subscribers {
+				require.LessOrEqual(t, s.bytes, int64(subscriberQueueMaxBytes))
+				p.removeSubscriber(nil, s, log)
+				require.Zero(t, s.bytes)
+			}
+			require.Zero(t, p.queuedBytes.Load(), "cancellation must release unfinished batches")
+		})
 	}
 }
