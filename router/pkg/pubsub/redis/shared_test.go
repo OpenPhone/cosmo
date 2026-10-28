@@ -3,6 +3,7 @@ package redis
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -216,9 +217,12 @@ func TestSharedConnections_DropsOverSubscriberCap(t *testing.T) {
 		return len(redis.PubSubChannels("")) == 2
 	}, 2*time.Second, 10*time.Millisecond)
 
+	redis.Publish("orders:org-1", "in-flight")
+	require.Eventually(t, slow.blocked.Load, 2*time.Second, 10*time.Millisecond)
+
+	// 7 messages of 1 MiB fit in the 8 MiB queue; the other 5 are dropped.
 	payload := strings.Repeat("x", 1024*1024)
-	const published = 12
-	for range published {
+	for range 12 {
 		redis.Publish("orders:org-1", payload)
 	}
 	redis.Publish("orders:org-2", "unaffected")
@@ -227,14 +231,17 @@ func TestSharedConnections_DropsOverSubscriberCap(t *testing.T) {
 		return len(other.received()) == 1
 	}, 5*time.Second, 10*time.Millisecond)
 	require.Eventually(t, func() bool {
-		return store.count() >= published-subscriberQueueMaxBytes/len(payload)
+		return store.count() == 5
 	}, 5*time.Second, 10*time.Millisecond)
 
 	slow.release()
 	require.Eventually(t, func() bool {
-		return len(slow.received())+store.count() == published
+		return len(slow.received()) == 8
 	}, 5*time.Second, 10*time.Millisecond)
-	require.Zero(t, adapter.queuedBytes.Load())
+	require.Equal(t, 5, store.count())
+	require.Eventually(t, func() bool {
+		return adapter.queuedBytes.Load() == 0
+	}, 2*time.Second, 10*time.Millisecond)
 }
 
 func TestSharedConnections_DropsOverProviderCap(t *testing.T) {
@@ -471,5 +478,73 @@ func TestSharedConnections_InFlightBatchesCountTowardLimits(t *testing.T) {
 			}
 			require.Zero(t, p.queuedBytes.Load(), "cancellation must release unfinished batches")
 		})
+	}
+}
+
+func TestSharedConnections_ConcurrentChurn(t *testing.T) {
+	t.Parallel()
+
+	redis := miniredis.RunT(t)
+	adapter := newSharedAdapter(t, redis, 4, nil)
+
+	const (
+		churnKeys    = 20
+		survivorKeys = 10
+		goroutines   = 50
+	)
+	key := func(i int) string { return fmt.Sprintf("orders:org-%d", i) }
+
+	stopPublishing := make(chan struct{})
+	var publisher sync.WaitGroup
+	publisher.Go(func() {
+		for i := 0; ; i++ {
+			select {
+			case <-stopPublishing:
+				return
+			default:
+				redis.Publish(key(i%churnKeys), "churn")
+			}
+		}
+	})
+
+	survivors := make([]*recordingUpdater, goroutines)
+	var churn sync.WaitGroup
+	for g := range goroutines {
+		churn.Go(func() {
+			for i := range 40 {
+				ctx, cancel := context.WithCancel(context.Background())
+				if err := adapter.Subscribe(ctx, &SubscriptionEventConfiguration{Provider: "test-provider", Channels: []string{key((g + i) % churnKeys)}}, &recordingUpdater{}); err != nil {
+					t.Error(err)
+				}
+				cancel()
+			}
+			survivors[g] = &recordingUpdater{}
+			if err := adapter.Subscribe(context.Background(), &SubscriptionEventConfiguration{Provider: "test-provider", Channels: []string{key(g % survivorKeys)}}, survivors[g]); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	churn.Wait()
+	close(stopPublishing)
+	publisher.Wait()
+
+	want := make([]string, survivorKeys)
+	for i := range want {
+		want[i] = key(i)
+	}
+	require.Eventually(t, func() bool {
+		got := redis.PubSubChannels("")
+		slices.Sort(got)
+		slices.Sort(want)
+		return slices.Equal(got, want)
+	}, 5*time.Second, 10*time.Millisecond, "expected exactly the survivor keys to stay subscribed")
+
+	for i := range survivorKeys {
+		redis.Publish(key(i), "final")
+	}
+	for g, updater := range survivors {
+		require.Eventually(t, func() bool {
+			return slices.Contains(updater.received(), "final")
+		}, 5*time.Second, 10*time.Millisecond, "survivor %d did not get its message", g)
 	}
 }
