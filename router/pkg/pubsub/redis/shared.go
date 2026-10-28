@@ -169,8 +169,7 @@ func (p *ProviderAdapter) subscribeShared(ctx context.Context, providerID string
 }
 
 // SUBSCRIBE and UNSUBSCRIBE go out under the shard lock so an UNSUBSCRIBE cannot
-// overtake a SUBSCRIBE for the same key. A failed command is still recorded by
-// go-redis and sent again when it reconnects.
+// overtake a SUBSCRIBE for the same key.
 func (p *ProviderAdapter) addSubscriber(key string, s *subscriber, log *zap.Logger) {
 	sh := p.shardFor(key)
 	sh.mu.Lock()
@@ -186,15 +185,23 @@ func (p *ProviderAdapter) addSubscriber(key string, s *subscriber, log *zap.Logg
 		return
 	}
 
-	var err error
-	if isPattern(key) {
-		err = sh.pubsub.PSubscribe(p.ctx, key)
-	} else {
-		err = sh.pubsub.Subscribe(p.ctx, key)
+	err := sh.subscribe(p.ctx, key)
+	// A failed write reconnects and resubscribes before go-redis records the new
+	// key, so the fresh connection would miss it. The retry runs after the key is
+	// recorded: it writes on the new connection, or the next reconnect carries it.
+	if err != nil && p.ctx.Err() == nil {
+		err = sh.subscribe(p.ctx, key)
 	}
 	if err != nil {
 		log.Warn("redis subscribe failed, will retry on reconnect", zap.String("key", key), zap.Error(err))
 	}
+}
+
+func (sh *shard) subscribe(ctx context.Context, key string) error {
+	if isPattern(key) {
+		return sh.pubsub.PSubscribe(ctx, key)
+	}
+	return sh.pubsub.Subscribe(ctx, key)
 }
 
 func (p *ProviderAdapter) removeSubscriber(keys []string, s *subscriber, log *zap.Logger) {
@@ -222,5 +229,7 @@ func (p *ProviderAdapter) removeSubscriber(keys []string, s *subscriber, log *za
 		}
 		sh.mu.Unlock()
 	}
-	p.take(s)
+	if _, dropped := p.take(s); dropped > 0 {
+		log.Warn("redis subscriber queue full, dropped messages", zap.Int("dropped", dropped))
+	}
 }

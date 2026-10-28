@@ -236,6 +236,40 @@ func TestSharedConnections_DropsOverSubscriberCap(t *testing.T) {
 	require.Zero(t, adapter.queuedBytes.Load())
 }
 
+func TestSharedConnections_DropsOverProviderCap(t *testing.T) {
+	t.Parallel()
+
+	redis := miniredis.RunT(t)
+	store := &droppedCounter{}
+	adapter := newSharedAdapter(t, redis, 4, store)
+
+	const subscribers = 10
+	slow := make([]*blockingUpdater, subscribers)
+	for i := range slow {
+		slow[i] = newBlockingUpdater(t)
+		channel := fmt.Sprintf("orders:org-%d", i)
+		subscribe(t, context.Background(), adapter, slow[i], channel)
+		require.Eventually(t, func() bool {
+			return len(redis.PubSubChannels(channel)) == 1
+		}, 2*time.Second, 10*time.Millisecond)
+		redis.Publish(channel, "in-flight")
+		require.Eventually(t, slow[i].blocked.Load, 2*time.Second, 10*time.Millisecond)
+	}
+
+	// 10 subscribers x 7 MiB stays under each subscriber cap but passes the provider cap.
+	payload := strings.Repeat("x", 1024*1024)
+	for i := range subscribers {
+		for range 7 {
+			redis.Publish(fmt.Sprintf("orders:org-%d", i), payload)
+		}
+	}
+
+	require.Eventually(t, func() bool {
+		return store.count() > 0
+	}, 5*time.Second, 10*time.Millisecond)
+	require.LessOrEqual(t, adapter.queuedBytes.Load(), int64(providerQueueMaxBytes))
+}
+
 func TestSharedConnections_RemovedSubscriberReleasesQueuedBytes(t *testing.T) {
 	t.Parallel()
 
