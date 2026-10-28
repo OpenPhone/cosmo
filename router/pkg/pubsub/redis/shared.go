@@ -90,8 +90,12 @@ func (p *ProviderAdapter) dispatch(sh *shard, msgs <-chan *redis.Message) {
 	}
 }
 
+func messageSize(msg *redis.Message) int64 {
+	return int64(len(msg.Payload)+len(msg.Channel)+len(msg.Pattern)) + messageOverhead
+}
+
 func (p *ProviderAdapter) enqueue(s *subscriber, msg *redis.Message) bool {
-	size := int64(len(msg.Payload)+len(msg.Channel)+len(msg.Pattern)) + messageOverhead
+	size := messageSize(msg)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -120,8 +124,8 @@ func (p *ProviderAdapter) take(s *subscriber) ([]*redis.Message, int) {
 	defer s.mu.Unlock()
 
 	msgs, dropped := s.queue, s.dropped
-	p.queuedBytes.Add(-s.bytes)
-	s.queue, s.bytes, s.dropped = nil, 0, 0
+	// Keep the batch charged until each message has been delivered or discarded.
+	s.queue, s.dropped = nil, 0
 	return msgs, dropped
 }
 
@@ -141,8 +145,8 @@ func (p *ProviderAdapter) subscribeShared(ctx context.Context, providerID string
 				if dropped > 0 {
 					log.Warn("redis subscriber queue full, dropped messages", zap.Int("dropped", dropped))
 				}
-				for _, msg := range msgs {
-					if ctx.Err() != nil {
+				for i, msg := range msgs {
+					if ctx.Err() != nil || p.ctx.Err() != nil {
 						return
 					}
 					p.streamMetricStore.Consume(ctx, metric.StreamsEvent{
@@ -156,6 +160,12 @@ func (p *ProviderAdapter) subscribeShared(ctx context.Context, providerID string
 							Data: []byte(msg.Payload),
 						}},
 					})
+					size := messageSize(msg)
+					msgs[i] = nil // Do not retain delivered payloads in the batch.
+					s.mu.Lock()
+					s.bytes -= size
+					p.queuedBytes.Add(-size)
+					s.mu.Unlock()
 				}
 			case <-p.ctx.Done():
 				log.Debug("application context done, stopping subscription")
@@ -229,7 +239,13 @@ func (p *ProviderAdapter) removeSubscriber(keys []string, s *subscriber, log *za
 		}
 		sh.mu.Unlock()
 	}
-	if _, dropped := p.take(s); dropped > 0 {
+	// No dispatcher can enqueue now. Release queued and unfinished batch bytes.
+	s.mu.Lock()
+	dropped := s.dropped
+	p.queuedBytes.Add(-s.bytes)
+	s.queue, s.bytes, s.dropped = nil, 0, 0
+	s.mu.Unlock()
+	if dropped > 0 {
 		log.Warn("redis subscriber queue full, dropped messages", zap.Int("dropped", dropped))
 	}
 }
