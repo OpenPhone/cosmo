@@ -62,4 +62,4 @@ catalog:
   '@connectrpc/connect-web': 1.5.0
 
   # GraphQL tooling
-  '@graphql-tools/utils': ^11.0.0
+  '@graphql-tools/utils': ^12.0.2
